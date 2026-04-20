@@ -1,0 +1,19 @@
+[package]
+name = "katachi-test-support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fixtures, fake harness, and helpers for katachi tests."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+katachi-core = { path = "../katachi-core" }
+camino = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
