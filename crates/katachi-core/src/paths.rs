@@ -118,23 +118,34 @@ pub fn resolve_config_file(overrides: &PathOverrides) -> Result<ResolvedPath, Pa
     if let Some(from_env) = env_override("KATACHI_CONFIG")? {
         return Ok(ResolvedPath {
             path: from_env,
-            source: PathSource::EnvVar { name: "KATACHI_CONFIG".into() },
+            source: PathSource::EnvVar {
+                name: "KATACHI_CONFIG".into(),
+            },
         });
     }
 
     let xdg = xdg_config_dir()?.join("katachi").join("config.toml");
     if xdg.exists() {
-        return Ok(ResolvedPath { path: xdg, source: PathSource::Xdg });
+        return Ok(ResolvedPath {
+            path: xdg,
+            source: PathSource::Xdg,
+        });
     }
 
     let legacy = legacy_home()?.join("config.toml");
     if legacy.exists() {
-        return Ok(ResolvedPath { path: legacy, source: PathSource::LegacyHome });
+        return Ok(ResolvedPath {
+            path: legacy,
+            source: PathSource::LegacyHome,
+        });
     }
 
     // Nothing exists. Default to the XDG path; caller will decide whether
     // to create it or proceed with pure defaults.
-    Ok(ResolvedPath { path: xdg, source: PathSource::XdgDefault })
+    Ok(ResolvedPath {
+        path: xdg,
+        source: PathSource::XdgDefault,
+    })
 }
 
 /// Resolve the data and cache roots after the config file has been loaded.
@@ -144,7 +155,10 @@ pub fn resolve_storage_paths(
 ) -> Result<StoragePaths, PathError> {
     let data_root = resolve_data_root(overrides, storage_config)?;
     let cache_root = resolve_cache_root(overrides, storage_config)?;
-    Ok(StoragePaths { data_root, cache_root })
+    Ok(StoragePaths {
+        data_root,
+        cache_root,
+    })
 }
 
 fn resolve_data_root(
@@ -160,7 +174,9 @@ fn resolve_data_root(
     if let Some(from_env) = env_override("KATACHI_DATA")? {
         return Ok(ResolvedPath {
             path: from_env,
-            source: PathSource::EnvVar { name: "KATACHI_DATA".into() },
+            source: PathSource::EnvVar {
+                name: "KATACHI_DATA".into(),
+            },
         });
     }
     if let Some(from_config) = &storage_config.data {
@@ -172,15 +188,24 @@ fn resolve_data_root(
 
     let xdg = xdg_data_dir()?.join("katachi");
     if xdg.exists() {
-        return Ok(ResolvedPath { path: xdg, source: PathSource::Xdg });
+        return Ok(ResolvedPath {
+            path: xdg,
+            source: PathSource::Xdg,
+        });
     }
 
     let legacy = legacy_home()?;
     if legacy.exists() {
-        return Ok(ResolvedPath { path: legacy, source: PathSource::LegacyHome });
+        return Ok(ResolvedPath {
+            path: legacy,
+            source: PathSource::LegacyHome,
+        });
     }
 
-    Ok(ResolvedPath { path: xdg, source: PathSource::XdgDefault })
+    Ok(ResolvedPath {
+        path: xdg,
+        source: PathSource::XdgDefault,
+    })
 }
 
 fn resolve_cache_root(
@@ -196,7 +221,9 @@ fn resolve_cache_root(
     if let Some(from_env) = env_override("KATACHI_CACHE")? {
         return Ok(ResolvedPath {
             path: from_env,
-            source: PathSource::EnvVar { name: "KATACHI_CACHE".into() },
+            source: PathSource::EnvVar {
+                name: "KATACHI_CACHE".into(),
+            },
         });
     }
     if let Some(from_config) = &storage_config.cache {
@@ -208,15 +235,24 @@ fn resolve_cache_root(
 
     let xdg = xdg_cache_dir()?.join("katachi");
     if xdg.exists() {
-        return Ok(ResolvedPath { path: xdg, source: PathSource::Xdg });
+        return Ok(ResolvedPath {
+            path: xdg,
+            source: PathSource::Xdg,
+        });
     }
 
     let legacy = legacy_home()?.join("cache");
     if legacy.exists() {
-        return Ok(ResolvedPath { path: legacy, source: PathSource::LegacyHome });
+        return Ok(ResolvedPath {
+            path: legacy,
+            source: PathSource::LegacyHome,
+        });
     }
 
-    Ok(ResolvedPath { path: xdg, source: PathSource::XdgDefault })
+    Ok(ResolvedPath {
+        path: xdg,
+        source: PathSource::XdgDefault,
+    })
 }
 
 fn env_override(name: &str) -> Result<Option<Utf8PathBuf>, PathError> {
@@ -291,7 +327,10 @@ mod tests {
             for k in keys {
                 env::remove_var(k);
             }
-            Self { _lock: lock, keys: saved }
+            Self {
+                _lock: lock,
+                keys: saved,
+            }
         }
     }
     impl Drop for EnvGuard {
@@ -330,7 +369,9 @@ mod tests {
         assert_eq!(resolved.path.as_str(), "/tmp/from-env.toml");
         assert_eq!(
             resolved.source,
-            PathSource::EnvVar { name: "KATACHI_CONFIG".into() }
+            PathSource::EnvVar {
+                name: "KATACHI_CONFIG".into()
+            }
         );
     }
 
@@ -371,11 +412,7 @@ mod tests {
 
     #[test]
     fn legacy_home_picked_up_when_present_and_xdg_absent() {
-        let _g = EnvGuard::new(&[
-            "KATACHI_CONFIG",
-            "XDG_CONFIG_HOME",
-            "HOME",
-        ]);
+        let _g = EnvGuard::new(&["KATACHI_CONFIG", "XDG_CONFIG_HOME", "HOME"]);
         let home = TempDir::new().unwrap();
         env::set_var("HOME", home.path());
         let legacy = fake_home(&home).join(".katachi");

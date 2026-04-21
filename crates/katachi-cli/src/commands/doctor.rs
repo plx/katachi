@@ -150,7 +150,11 @@ impl Report {
         );
         println!(
             "  loaded        : {}",
-            if self.config.loaded_from_disk { "yes" } else { "no (using defaults)" }
+            if self.config.loaded_from_disk {
+                "yes"
+            } else {
+                "no (using defaults)"
+            }
         );
         println!("  schema version: {}", self.config.version);
         println!();
@@ -183,11 +187,17 @@ impl Report {
         for h in &self.harnesses {
             let enabled = if h.enabled { "enabled" } else { "disabled" };
             let found = if h.binary_found {
-                format!("found: {}", h.resolved_binary_path.as_deref().unwrap_or("?"))
+                format!(
+                    "found: {}",
+                    h.resolved_binary_path.as_deref().unwrap_or("?")
+                )
             } else {
                 "not found on PATH".to_string()
             };
-            println!("  {:<6} : {enabled}, binary=`{}`, {found}", h.name, h.binary);
+            println!(
+                "  {:<6} : {enabled}, binary=`{}`, {found}",
+                h.name, h.binary
+            );
         }
         println!();
         if !self.diagnostics.is_empty() {

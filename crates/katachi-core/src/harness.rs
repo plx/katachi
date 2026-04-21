@@ -4,23 +4,22 @@
 //! in tests) plugs into the shared plan -> execute -> record pipeline via
 //! this trait. All inputs arrive via context structs; trait methods return
 //! typed errors so the CLI can map them to stable exit codes.
-//!
-//! The Phase-2 roster types (`DiscoveredItem`, `DependencyEdge`,
-//! `RosterCatalog`) are defined here as deliberately minimal stubs so the
-//! trait signatures stabilize now and stay stable as Phase 2 fills them in.
 
 use camino::Utf8Path;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::config::KatachiConfig;
-use crate::diagnostic::Diagnostic;
 use crate::error::{ExecutionError, PlanError, ResolveError};
 use crate::model::{HarnessKind, ItemRef};
 use crate::paths::StoragePaths;
 use crate::persist::RunDirectory;
 use crate::plan::{ExecutionPlan, InvocationRequest, ResolvedKatachi};
 use crate::record::{ExecutionRecord, RunId};
+pub use crate::roster::{
+    Constraint, DependencyEdge, DiscoveredItem, EdgeKind, EdgeRole, EdgeRoleMask, ItemSource,
+    PackageRef, RosterCatalog,
+};
 
 /// Contract implemented once per harness. Stateless: all inputs arrive
 /// via context structs.
@@ -108,72 +107,9 @@ pub struct ExecuteContext<'a> {
     pub started_at: OffsetDateTime,
 }
 
-/// Phase-2 stub: a harness-scoped inventory of discovered items + edges.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct RosterCatalog {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub harness: Option<HarnessKind>,
-    #[serde(default)]
-    pub items: Vec<DiscoveredItem>,
-    #[serde(default)]
-    pub edges: Vec<DependencyEdge>,
-    #[serde(default)]
-    pub diagnostics: Vec<Diagnostic>,
-}
-
-impl RosterCatalog {
-    pub fn empty(harness: HarnessKind) -> Self {
-        Self {
-            harness: Some(harness),
-            ..Default::default()
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty() && self.edges.is_empty()
-    }
-}
-
-/// Phase-2 stub: a single discovered roster item.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DiscoveredItem {
-    pub item_ref: ItemRef,
-    pub display_name: String,
-    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
-    pub raw: serde_json::Value,
-}
-
-/// Phase-2 stub: a typed edge between two roster items.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DependencyEdge {
-    pub from: ItemRef,
-    pub to: ItemRef,
-    pub kind: EdgeKind,
-    #[serde(default)]
-    pub required: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EdgeKind {
-    /// Item ships inside the other's package/plugin/extension.
-    Packaging,
-    /// Item references or augments the other at runtime.
-    Semantic,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn empty_catalog_has_harness_tag() {
-        let c = RosterCatalog::empty(HarnessKind::Claude);
-        assert_eq!(c.harness, Some(HarnessKind::Claude));
-        assert!(c.is_empty());
-    }
 
     #[test]
     fn explain_result_roundtrip() {
@@ -189,18 +125,6 @@ mod tests {
         let back: ExplainResult = serde_json::from_value(j).unwrap();
         assert_eq!(back.item.id, "workspace-a11y");
         assert_eq!(back.sections.len(), 1);
-    }
-
-    #[test]
-    fn edge_kind_serializes_snake_case() {
-        assert_eq!(
-            serde_json::to_value(EdgeKind::Packaging).unwrap(),
-            serde_json::json!("packaging"),
-        );
-        assert_eq!(
-            serde_json::to_value(EdgeKind::Semantic).unwrap(),
-            serde_json::json!("semantic"),
-        );
     }
 
     /// Trivial impl to prove the trait is object-safe where it matters and
@@ -228,10 +152,7 @@ mod tests {
                 message: "dummy".into(),
             })
         }
-        fn execute(
-            &self,
-            _ctx: &ExecuteContext<'_>,
-        ) -> Result<ExecutionRecord, ExecutionError> {
+        fn execute(&self, _ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> {
             Err(ExecutionError::NonZeroExit {
                 command: "dummy".into(),
                 status: "exit-code: 1".into(),

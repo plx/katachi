@@ -90,19 +90,14 @@ impl FromStr for BackendKind {
 }
 
 /// How katachi constructs the environment a harness sees.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MaterializationMode {
     /// Use the user's existing harness installation and discovery as-is.
     Ambient,
     /// Build an ephemeral overlay with only the selected items and configs.
+    #[default]
     TempOverlay,
-}
-
-impl Default for MaterializationMode {
-    fn default() -> Self {
-        Self::TempOverlay
-    }
 }
 
 /// Stable identifier for a roster item.
@@ -118,7 +113,11 @@ pub struct ItemRef {
 
 impl ItemRef {
     pub fn new(harness: HarnessKind, kind: impl Into<String>, id: impl Into<String>) -> Self {
-        Self { harness, kind: kind.into(), id: id.into() }
+        Self {
+            harness,
+            kind: kind.into(),
+            id: id.into(),
+        }
     }
 }
 
@@ -133,10 +132,12 @@ impl FromStr for ItemRef {
     type Err = ParseKindError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // harness : kind : id  (id may itself contain colons)
-        let (harness_s, rest) =
-            s.split_once(':').ok_or_else(|| ParseKindError::BadItemRef(s.to_owned()))?;
-        let (kind_s, id_s) =
-            rest.split_once(':').ok_or_else(|| ParseKindError::BadItemRef(s.to_owned()))?;
+        let (harness_s, rest) = s
+            .split_once(':')
+            .ok_or_else(|| ParseKindError::BadItemRef(s.to_owned()))?;
+        let (kind_s, id_s) = rest
+            .split_once(':')
+            .ok_or_else(|| ParseKindError::BadItemRef(s.to_owned()))?;
         let harness = HarnessKind::from_str(harness_s)?;
         if kind_s.is_empty() || id_s.is_empty() {
             return Err(ParseKindError::BadItemRef(s.to_owned()));

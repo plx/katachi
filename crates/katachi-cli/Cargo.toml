@@ -16,6 +16,10 @@ workspace = true
 
 [dependencies]
 katachi-core = { path = "../katachi-core" }
+# Phase 2: the only working HarnessModule impl lives in test-support, gated by
+# the `KATACHI_FIXTURE_HARNESSES` env var at runtime. Phase 3 will introduce
+# real harness crates and demote this dependency to `[dev-dependencies]`.
+katachi-test-support = { path = "../katachi-test-support" }
 anyhow = { workspace = true }
 camino = { workspace = true }
 clap = { workspace = true }

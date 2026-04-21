@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn run_id_serializes_transparent() {
         let id = RunId::new();
-        let j = serde_json::to_value(&id).unwrap();
+        let j = serde_json::to_value(id).unwrap();
         // Transparent: just a string, not an object with `{"0": "..."}`
         assert!(j.is_string());
     }

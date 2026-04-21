@@ -187,11 +187,10 @@ pub fn load(source: ResolvedPath) -> Result<ConfigLoad, ConfigError> {
         path: path.to_string(),
         source,
     })?;
-    let config: KatachiConfig =
-        toml::from_str(&raw).map_err(|source| ConfigError::Parse {
-            path: path.to_string(),
-            source,
-        })?;
+    let config: KatachiConfig = toml::from_str(&raw).map_err(|source| ConfigError::Parse {
+        path: path.to_string(),
+        source,
+    })?;
 
     if config.version != 1 {
         diagnostics.push(ConfigDiagnostic {
@@ -234,18 +233,23 @@ mod tests {
     use tempfile::TempDir;
 
     fn fake_resolved(path: Utf8PathBuf) -> ResolvedPath {
-        ResolvedPath { path, source: PathSource::XdgDefault }
+        ResolvedPath {
+            path,
+            source: PathSource::XdgDefault,
+        }
     }
 
     #[test]
     fn missing_file_returns_defaults_with_info() {
         let dir = TempDir::new().unwrap();
-        let path =
-            Utf8PathBuf::from_path_buf(dir.path().join("does-not-exist.toml")).unwrap();
+        let path = Utf8PathBuf::from_path_buf(dir.path().join("does-not-exist.toml")).unwrap();
         let load = load(fake_resolved(path)).unwrap();
         assert!(!load.loaded_from_disk);
         assert_eq!(load.config.version, 1);
-        assert_eq!(load.config.defaults.harness_priority, vec!["claude", "codex", "gemini"]);
+        assert_eq!(
+            load.config.defaults.harness_priority,
+            vec!["claude", "codex", "gemini"]
+        );
         assert_eq!(load.diagnostics.len(), 1);
         assert_eq!(load.diagnostics[0].severity, ConfigSeverity::Info);
     }
@@ -277,7 +281,10 @@ enabled = false
         std::fs::write(path.as_path(), body).unwrap();
         let load = load(fake_resolved(path)).unwrap();
         assert!(load.loaded_from_disk);
-        assert_eq!(load.config.defaults.harness_priority, vec!["codex", "claude"]);
+        assert_eq!(
+            load.config.defaults.harness_priority,
+            vec!["codex", "claude"]
+        );
         assert_eq!(load.config.defaults.materialization, "ambient");
 
         let claude = load.config.enabled_harness("claude").unwrap();
@@ -287,7 +294,10 @@ enabled = false
 
         assert!(load.config.enabled_harness("codex").is_none());
         assert_eq!(load.config.harness_binary("gemini"), "gemini");
-        assert_eq!(load.config.storage.data.as_deref().unwrap().as_str(), "/custom/data");
+        assert_eq!(
+            load.config.storage.data.as_deref().unwrap().as_str(),
+            "/custom/data"
+        );
     }
 
     #[test]
@@ -309,6 +319,9 @@ enabled = false
         std::fs::write(path.as_path(), "version = not-a-number\n").unwrap();
         let err = load(fake_resolved(path.clone())).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains(path.as_str()), "error should reference path: {msg}");
+        assert!(
+            msg.contains(path.as_str()),
+            "error should reference path: {msg}"
+        );
     }
 }

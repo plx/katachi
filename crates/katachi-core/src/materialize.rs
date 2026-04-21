@@ -62,11 +62,12 @@ impl TempOverlay {
     /// Create a new overlay with a custom tempdir prefix.
     pub fn with_prefix(prefix: &str) -> io::Result<Self> {
         let tempdir = Builder::new().prefix(prefix).tempdir()?;
-        let root = Utf8PathBuf::from_path_buf(tempdir.path().to_path_buf())
-            .map_err(|p| io::Error::new(io::ErrorKind::InvalidData, format!(
-                "overlay root is not UTF-8: {}",
-                p.display()
-            )))?;
+        let root = Utf8PathBuf::from_path_buf(tempdir.path().to_path_buf()).map_err(|p| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("overlay root is not UTF-8: {}", p.display()),
+            )
+        })?;
         Ok(Self {
             root,
             tempdir: Some(tempdir),
@@ -148,7 +149,9 @@ impl TempOverlay {
         std::os::unix::fs::symlink(target, &abs)?;
         self.manifest.push(OverlayEntry {
             dest: rel.to_owned(),
-            kind: OverlayEntryKind::SymlinkTo { target: target.to_owned() },
+            kind: OverlayEntryKind::SymlinkTo {
+                target: target.to_owned(),
+            },
         });
         Ok(abs)
     }
@@ -179,10 +182,7 @@ impl TempOverlay {
                 // Cross-filesystem rename — fall back to copy+remove.
                 copy_dir_recursive(
                     Utf8Path::from_path(&src_path).ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "overlay path is not UTF-8",
-                        )
+                        io::Error::new(io::ErrorKind::InvalidData, "overlay path is not UTF-8")
                     })?,
                     dest,
                 )?;
@@ -194,7 +194,11 @@ impl TempOverlay {
     }
 
     fn resolve_rel(&self, rel: &Utf8Path) -> io::Result<Utf8PathBuf> {
-        if rel.is_absolute() || rel.components().any(|c| matches!(c, camino::Utf8Component::ParentDir)) {
+        if rel.is_absolute()
+            || rel
+                .components()
+                .any(|c| matches!(c, camino::Utf8Component::ParentDir))
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("overlay path `{rel}` must be relative and must not contain `..`"),
@@ -253,7 +257,8 @@ mod tests {
     #[test]
     fn write_inline_creates_parents_and_records_manifest() {
         let mut ov = TempOverlay::new().unwrap();
-        ov.write_inline("project/.claude/CLAUDE.md", "hello").unwrap();
+        ov.write_inline("project/.claude/CLAUDE.md", "hello")
+            .unwrap();
         let abs = ov.root().join("project/.claude/CLAUDE.md");
         assert_eq!(fs::read_to_string(abs).unwrap(), "hello");
         let m = ov.manifest();
@@ -317,7 +322,10 @@ mod tests {
             let ov = TempOverlay::new().unwrap();
             ov.root().to_owned()
         };
-        assert!(!path.exists(), "overlay should be cleaned up on drop by default");
+        assert!(
+            !path.exists(),
+            "overlay should be cleaned up on drop by default"
+        );
     }
 
     #[test]

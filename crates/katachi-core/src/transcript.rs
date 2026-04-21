@@ -31,7 +31,10 @@ pub enum EventKind {
     /// A successfully parsed JSON event from the child's structured output.
     JsonEvent { payload: serde_json::Value },
     /// Tool call requested by the agent.
-    ToolUse { name: String, input: serde_json::Value },
+    ToolUse {
+        name: String,
+        input: serde_json::Value,
+    },
     /// Tool result returned to the agent.
     ToolResult {
         name: String,
@@ -67,7 +70,10 @@ impl TranscriptBuilder {
             ts: OffsetDateTime::now_utc(),
             kind,
         };
-        self.next_seq = self.next_seq.checked_add(1).expect("transcript seq overflow");
+        self.next_seq = self
+            .next_seq
+            .checked_add(1)
+            .expect("transcript seq overflow");
         event
     }
 
@@ -78,7 +84,10 @@ impl TranscriptBuilder {
             ts,
             kind,
         };
-        self.next_seq = self.next_seq.checked_add(1).expect("transcript seq overflow");
+        self.next_seq = self
+            .next_seq
+            .checked_add(1)
+            .expect("transcript seq overflow");
         event
     }
 
@@ -95,7 +104,12 @@ mod tests {
     fn event_serializes_flat_with_kind_tag() {
         let mut b = TranscriptBuilder::new();
         let ts = OffsetDateTime::UNIX_EPOCH;
-        let ev = b.push_at(ts, EventKind::StdoutText { text: "hello".into() });
+        let ev = b.push_at(
+            ts,
+            EventKind::StdoutText {
+                text: "hello".into(),
+            },
+        );
         let j = serde_json::to_value(&ev).unwrap();
         assert_eq!(j["kind"], "stdout_text");
         assert_eq!(j["text"], "hello");
@@ -118,7 +132,12 @@ mod tests {
         let mut b = TranscriptBuilder::new();
         let ts = OffsetDateTime::UNIX_EPOCH;
         let events = vec![
-            b.push_at(ts, EventKind::StdoutText { text: "hello\n".into() }),
+            b.push_at(
+                ts,
+                EventKind::StdoutText {
+                    text: "hello\n".into(),
+                },
+            ),
             b.push_at(
                 ts,
                 EventKind::JsonEvent {

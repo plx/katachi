@@ -53,10 +53,13 @@ pub async fn run_async(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, Exec
     let exec = &plan.execution;
     let run_id = ctx.run_dir.run_id();
 
-    let (argv0, args) = exec.argv.split_first().ok_or_else(|| ExecutionError::Spawn {
-        command: "<empty>".into(),
-        source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "argv is empty"),
-    })?;
+    let (argv0, args) = exec
+        .argv
+        .split_first()
+        .ok_or_else(|| ExecutionError::Spawn {
+            command: "<empty>".into(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "argv is empty"),
+        })?;
 
     // Open writers backed by the run directory.
     let mut transcript = ctx.run_dir.transcript_writer()?;
@@ -114,7 +117,9 @@ pub async fn run_async(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, Exec
     // Emit a user_message event so transcripts fully represent the
     // interaction when the action carries a prompt.
     if let Some(prompt) = action_prompt(&request.action) {
-        let ev = builder.push(EventKind::UserMessage { text: prompt.to_string() });
+        let ev = builder.push(EventKind::UserMessage {
+            text: prompt.to_string(),
+        });
         transcript.append(&ev)?;
     }
 

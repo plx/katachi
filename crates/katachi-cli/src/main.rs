@@ -3,11 +3,12 @@
 mod cli;
 mod commands;
 mod exit;
+mod fixtures;
 mod logging;
 
 use clap::Parser;
 
-use cli::{Cli, Command, GlobalArgs};
+use cli::{Cli, Command, GlobalArgs, HaveAction, HaveCmd};
 use exit::ExitCode;
 
 fn main() -> std::process::ExitCode {
@@ -26,7 +27,21 @@ fn dispatch(cli: Cli) -> ExitCode {
                 ExitCode::Config
             }
         },
+        Command::Have(have) => dispatch_have(&global, have),
         other => not_yet_implemented(&global, &other),
+    }
+}
+
+fn dispatch_have(global: &GlobalArgs, have: HaveCmd) -> ExitCode {
+    match &have.action {
+        HaveAction::Describe => match commands::have::run_describe(global, &have) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!("katachi have: {err:#}");
+                ExitCode::Config
+            }
+        },
+        _ => not_yet_implemented(global, &Command::Have(have)),
     }
 }
 

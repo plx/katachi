@@ -1,0 +1,17 @@
+---
+source: crates/katachi-cli/tests/have_describe.rs
+assertion_line: 102
+expression: stdout
+---
+katachi: a11y
+description: Accessibility auditing loadout.
+harness: claude (backend: cli)
+
+selected items (4):
+  [agent]
+    - reviewer  (semantic-closure via claude:skill:axe-runner)
+  [plugin]
+    - web-a11y  (direct)
+  [skill]
+    - axe-reporter  (packaging-closure via claude:plugin:web-a11y)
+    - axe-runner  (packaging-closure via claude:plugin:web-a11y)

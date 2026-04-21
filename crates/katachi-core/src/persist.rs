@@ -119,11 +119,9 @@ impl RunDirectory {
             return Err(PersistError::AlreadyExists { path: final_path });
         }
 
-        fs::create_dir_all(runs_root.as_std_path()).map_err(|source| {
-            PersistError::CreateDir {
-                path: runs_root.to_owned(),
-                source,
-            }
+        fs::create_dir_all(runs_root.as_std_path()).map_err(|source| PersistError::CreateDir {
+            path: runs_root.to_owned(),
+            source,
         })?;
         match fs::create_dir(partial_path.as_std_path()) {
             Ok(()) => {}
@@ -138,7 +136,11 @@ impl RunDirectory {
             }
         }
 
-        Ok(Self { run_id, partial_path, final_path })
+        Ok(Self {
+            run_id,
+            partial_path,
+            final_path,
+        })
     }
 
     pub fn run_id(&self) -> RunId {
@@ -175,7 +177,10 @@ impl RunDirectory {
             .create(true)
             .append(true)
             .open(path.as_std_path())
-            .map_err(|source| PersistError::Open { path: path.clone(), source })?;
+            .map_err(|source| PersistError::Open {
+                path: path.clone(),
+                source,
+            })?;
         Ok(TranscriptWriter {
             path,
             writer: BufWriter::new(file),
@@ -246,12 +251,15 @@ impl RunDirectory {
 
     /// Atomically rename the partial directory to its final location.
     pub fn commit(self) -> PersistResult<Utf8PathBuf> {
-        fs::rename(self.partial_path.as_std_path(), self.final_path.as_std_path())
-            .map_err(|source| PersistError::Rename {
-                from: self.partial_path.clone(),
-                to: self.final_path.clone(),
-                source,
-            })?;
+        fs::rename(
+            self.partial_path.as_std_path(),
+            self.final_path.as_std_path(),
+        )
+        .map_err(|source| PersistError::Rename {
+            from: self.partial_path.clone(),
+            to: self.final_path.clone(),
+            source,
+        })?;
         Ok(self.final_path)
     }
 
@@ -290,12 +298,18 @@ pub struct TranscriptWriter {
 
 impl TranscriptWriter {
     pub fn append(&mut self, event: &TranscriptEvent) -> PersistResult<()> {
-        serde_json::to_writer(&mut self.writer, event)
-            .map_err(|source| PersistError::Serialize { what: "transcript event", source })?;
-        self.writer.write_all(b"\n").map_err(|source| PersistError::Write {
-            path: self.path.clone(),
-            source,
+        serde_json::to_writer(&mut self.writer, event).map_err(|source| {
+            PersistError::Serialize {
+                what: "transcript event",
+                source,
+            }
         })?;
+        self.writer
+            .write_all(b"\n")
+            .map_err(|source| PersistError::Write {
+                path: self.path.clone(),
+                source,
+            })?;
         Ok(())
     }
 
@@ -363,8 +377,8 @@ mod tests {
     use super::*;
     use crate::model::{BackendKind, HarnessKind};
     use crate::plan::{
-        ActionRequest, ExecutionBackendPlan, ExecutionPlan, InvocationRequest,
-        MaterializationPlan, TranscriptMode, PLAN_SCHEMA_VERSION,
+        ActionRequest, ExecutionBackendPlan, ExecutionPlan, InvocationRequest, MaterializationPlan,
+        TranscriptMode, PLAN_SCHEMA_VERSION,
     };
     use crate::record::{ExecutionRecord, FinalResult, Outcome, RECORD_SCHEMA_VERSION};
     use crate::transcript::{EventKind, TranscriptBuilder};
@@ -375,7 +389,9 @@ mod tests {
     fn sample_request() -> InvocationRequest {
         InvocationRequest::new(
             "demo",
-            ActionRequest::Execute { prompt: "hi".into() },
+            ActionRequest::Execute {
+                prompt: "hi".into(),
+            },
             Utf8PathBuf::from("/tmp"),
         )
     }
@@ -452,10 +468,7 @@ mod tests {
     fn create_errors_if_partial_exists() {
         let (_td, root) = runs_root();
         let run_id = RunId::new();
-        fs::create_dir_all(
-            root.join(format!("{run_id}{PARTIAL_SUFFIX}")).as_std_path(),
-        )
-        .unwrap();
+        fs::create_dir_all(root.join(format!("{run_id}{PARTIAL_SUFFIX}")).as_std_path()).unwrap();
         let err = RunDirectory::create(&root, run_id).unwrap_err();
         assert!(matches!(err, PersistError::AlreadyExists { .. }));
     }
@@ -474,8 +487,14 @@ mod tests {
         dir.write_record(&rec).unwrap();
 
         let req_json = fs::read_to_string(dir.partial_path().join(FILE_REQUEST)).unwrap();
-        assert!(req_json.contains('\n'), "JSON output should be pretty-printed");
-        assert!(req_json.ends_with('\n'), "JSON output should end in newline");
+        assert!(
+            req_json.contains('\n'),
+            "JSON output should be pretty-printed"
+        );
+        assert!(
+            req_json.ends_with('\n'),
+            "JSON output should end in newline"
+        );
 
         let parsed: InvocationRequest = serde_json::from_str(&req_json).unwrap();
         assert_eq!(parsed.katachi_id, req.katachi_id);
@@ -486,9 +505,10 @@ mod tests {
         assert_eq!(plan_back.run_id, run_id);
         assert_eq!(plan_back.execution.argv, vec!["echo", "hi"]);
 
-        let rec_back: ExecutionRecord =
-            serde_json::from_str(&fs::read_to_string(dir.partial_path().join(FILE_RECORD)).unwrap())
-                .unwrap();
+        let rec_back: ExecutionRecord = serde_json::from_str(
+            &fs::read_to_string(dir.partial_path().join(FILE_RECORD)).unwrap(),
+        )
+        .unwrap();
         assert_eq!(rec_back.result.outcome, Outcome::Success);
     }
 
@@ -621,7 +641,10 @@ mod tests {
         let partial = dir.partial_path().to_owned();
         dir.write_request(&sample_request()).unwrap();
         drop(dir);
-        assert!(partial.exists(), "partial dir should persist on drop for diagnosis");
+        assert!(
+            partial.exists(),
+            "partial dir should persist on drop for diagnosis"
+        );
     }
 
     #[test]

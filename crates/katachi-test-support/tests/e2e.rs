@@ -6,7 +6,9 @@
 
 use camino::Utf8PathBuf;
 use katachi_core::config::KatachiConfig;
-use katachi_core::harness::{ExecuteContext, HarnessModule, PlanContext, ResolveContext, RosterCatalog};
+use katachi_core::harness::{
+    ExecuteContext, HarnessModule, PlanContext, ResolveContext, RosterCatalog,
+};
 use katachi_core::persist::{
     RunDirectory, FILE_MANIFEST, FILE_PLAN, FILE_RECORD, FILE_REQUEST, FILE_STDERR, FILE_STDOUT,
     FILE_TRANSCRIPT,
@@ -30,7 +32,9 @@ fn drive(harness: &FakeHarness) -> RunArtifacts {
     let run_id = RunId::new();
     let request = InvocationRequest::new(
         "fake-demo",
-        ActionRequest::Execute { prompt: "say hi".into() },
+        ActionRequest::Execute {
+            prompt: "say hi".into(),
+        },
         runs_root.clone(),
     );
 
@@ -101,8 +105,14 @@ fn success_path_produces_complete_run_directory() {
     }
 
     let stdout = std::fs::read_to_string(art.final_path.join(FILE_STDOUT)).unwrap();
-    assert!(stdout.contains("hello"), "stdout missing 'hello': {stdout:?}");
-    assert!(stdout.contains("world"), "stdout missing 'world': {stdout:?}");
+    assert!(
+        stdout.contains("hello"),
+        "stdout missing 'hello': {stdout:?}"
+    );
+    assert!(
+        stdout.contains("world"),
+        "stdout missing 'world': {stdout:?}"
+    );
 
     let transcript = std::fs::read_to_string(art.final_path.join(FILE_TRANSCRIPT)).unwrap();
     assert!(transcript.contains("\"kind\":\"user_message\""));

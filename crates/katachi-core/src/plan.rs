@@ -42,11 +42,7 @@ fn default_request_schema() -> u32 {
 }
 
 impl InvocationRequest {
-    pub fn new(
-        katachi_id: impl Into<String>,
-        action: ActionRequest,
-        cwd: Utf8PathBuf,
-    ) -> Self {
+    pub fn new(katachi_id: impl Into<String>, action: ActionRequest, cwd: Utf8PathBuf) -> Self {
         Self {
             schema_version: REQUEST_SCHEMA_VERSION,
             katachi_id: katachi_id.into(),
@@ -170,19 +166,14 @@ pub struct ExecutionBackendPlan {
 }
 
 /// How the executor should interpret child-process output.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptMode {
     /// Capture stdout/stderr verbatim; no structured parsing.
+    #[default]
     RawOnly,
     /// Parse stdout as line-delimited JSON events alongside raw capture.
     JsonStream,
-}
-
-impl Default for TranscriptMode {
-    fn default() -> Self {
-        Self::RawOnly
-    }
 }
 
 /// The concrete plan produced by a harness module. This is what
@@ -224,7 +215,9 @@ mod tests {
 
     #[test]
     fn action_request_variants_tagged_correctly() {
-        let a = ActionRequest::Execute { prompt: "hi".into() };
+        let a = ActionRequest::Execute {
+            prompt: "hi".into(),
+        };
         let j = serde_json::to_value(&a).unwrap();
         assert_eq!(j["kind"], "execute");
         assert_eq!(j["prompt"], "hi");
@@ -243,7 +236,9 @@ mod tests {
     fn materialized_file_source_roundtrip() {
         let f = MaterializedFile {
             dest: Utf8PathBuf::from("project/CLAUDE.md"),
-            source: FileSource::Inline { contents: "hello".into() },
+            source: FileSource::Inline {
+                contents: "hello".into(),
+            },
         };
         let j = serde_json::to_value(&f).unwrap();
         assert_eq!(j["source"], "inline");

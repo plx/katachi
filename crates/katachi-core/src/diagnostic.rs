@@ -89,10 +89,7 @@ mod tests {
 
     #[test]
     fn any_error_detection() {
-        let ds = vec![
-            Diagnostic::info("x", "y"),
-            Diagnostic::warning("x", "y"),
-        ];
+        let ds = vec![Diagnostic::info("x", "y"), Diagnostic::warning("x", "y")];
         assert!(!any_error(&ds));
         let mut ds = ds;
         ds.push(Diagnostic::error("x", "y"));
