@@ -1,0 +1,24 @@
+---
+source: crates/katachi-test-support/tests/e2e.rs
+expression: plan
+---
+{
+  "backend": "cli",
+  "execution": {
+    "argv": [
+      "/bin/sh",
+      "-c",
+      "echo hi"
+    ],
+    "backend": "cli"
+  },
+  "harness": "claude",
+  "materialization": {
+    "files": [],
+    "mode": "ambient"
+  },
+  "run_id": "[uuid]",
+  "schema_version": 1,
+  "summary": "fake harness: echo hi",
+  "transcript_mode": "raw_only"
+}

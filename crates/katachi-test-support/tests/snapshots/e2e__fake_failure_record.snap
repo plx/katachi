@@ -1,0 +1,49 @@
+---
+source: crates/katachi-test-support/tests/e2e.rs
+expression: record
+---
+{
+  "events_count": 2,
+  "finished_at": "[ts]",
+  "plan": {
+    "backend": "cli",
+    "execution": {
+      "argv": [
+        "/bin/sh",
+        "-c",
+        "exit 7"
+      ],
+      "backend": "cli"
+    },
+    "harness": "claude",
+    "materialization": {
+      "files": [],
+      "mode": "ambient"
+    },
+    "run_id": "[uuid]",
+    "schema_version": 1,
+    "summary": "fake harness: exit 7",
+    "transcript_mode": "raw_only"
+  },
+  "request": {
+    "action": {
+      "kind": "execute",
+      "prompt": "say hi"
+    },
+    "cwd": "[tmpdir]",
+    "dry_run": false,
+    "katachi_id": "fake-demo",
+    "materialization": "temp-overlay",
+    "preferred_backends": [],
+    "preferred_harnesses": [],
+    "schema_version": 1
+  },
+  "result": {
+    "exit_code": 7,
+    "outcome": "failure",
+    "summary": "exited with code 7"
+  },
+  "run_id": "[uuid]",
+  "schema_version": 1,
+  "started_at": "[ts]"
+}

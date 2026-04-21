@@ -1,4 +1,8 @@
 //! Test support utilities for katachi.
 //!
-//! Phase 0 leaves this crate empty. Phase 1 will land `fake_harness` and
-//! fixture builders here; Phase 2 adds fixture roster catalogs.
+//! Houses fake harnesses, fixture builders, and other helpers that
+//! exercise the shared core without requiring a real harness binary.
+
+pub mod fake;
+
+pub use fake::FakeHarness;
