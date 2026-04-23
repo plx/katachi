@@ -161,8 +161,12 @@ pub fn resolve(inputs: ResolveInputs<'_>) -> Result<ResolveOutput, ResolveError>
         })
         .collect();
 
+    // Backend priority: target pin > request `--prefer-backend` > config > CLI.
+    // A target that pins a backend is treated as a hard constraint, so
+    // `--prefer-backend` only applies when the target leaves backend open.
     let backend = target
         .backend
+        .or_else(|| request.preferred_backends.first().copied())
         .or_else(|| pick_backend(config, target.harness))
         .unwrap_or(BackendKind::Cli);
 
@@ -753,5 +757,99 @@ item_ref = { harness = "claude", kind = "skill", id = "a" }
             .diagnostics
             .iter()
             .any(|d| d.code == "resolve.cycle"));
+    }
+
+    #[test]
+    fn preferred_backend_applied_when_target_unpinned() {
+        let h = TestHarness {
+            kind: HarnessKind::Claude,
+            catalog: toy_claude_catalog(),
+        };
+        let modules: [&dyn HarnessModule; 1] = [&h];
+        // Target does NOT pin a backend.
+        let def = KatachiDefinition::from_toml_str(
+            r#"
+id = "a11y"
+[[targets]]
+harness = "claude"
+[[targets.selectors.selectors]]
+type = "item_ref"
+item_ref = { harness = "claude", kind = "plugin", id = "web-a11y" }
+"#,
+        )
+        .unwrap();
+        let mut req = request_for("a11y");
+        req.preferred_backends = vec![BackendKind::SdkTs];
+        let paths = default_paths();
+        let cwd = Utf8PathBuf::from("/tmp");
+        let config = KatachiConfig::default();
+
+        let out = resolve(ResolveInputs::new(
+            &req, &def, &modules, &config, &paths, &cwd,
+        ))
+        .unwrap();
+        assert_eq!(out.resolved.backend, BackendKind::SdkTs);
+    }
+
+    #[test]
+    fn target_backend_pin_beats_preferred_backend() {
+        let h = TestHarness {
+            kind: HarnessKind::Claude,
+            catalog: toy_claude_catalog(),
+        };
+        let modules: [&dyn HarnessModule; 1] = [&h];
+        // Target pins backend = "cli".
+        let def = def_single_claude();
+        let mut req = request_for("a11y");
+        req.preferred_backends = vec![BackendKind::SdkTs];
+        let paths = default_paths();
+        let cwd = Utf8PathBuf::from("/tmp");
+        let config = KatachiConfig::default();
+
+        let out = resolve(ResolveInputs::new(
+            &req, &def, &modules, &config, &paths, &cwd,
+        ))
+        .unwrap();
+        assert_eq!(out.resolved.backend, BackendKind::Cli);
+    }
+
+    #[test]
+    fn preferred_backend_overrides_config_default_backend() {
+        let h = TestHarness {
+            kind: HarnessKind::Claude,
+            catalog: toy_claude_catalog(),
+        };
+        let modules: [&dyn HarnessModule; 1] = [&h];
+        let def = KatachiDefinition::from_toml_str(
+            r#"
+id = "a11y"
+[[targets]]
+harness = "claude"
+[[targets.selectors.selectors]]
+type = "item_ref"
+item_ref = { harness = "claude", kind = "plugin", id = "web-a11y" }
+"#,
+        )
+        .unwrap();
+        let mut req = request_for("a11y");
+        req.preferred_backends = vec![BackendKind::SdkPy];
+        let paths = default_paths();
+        let cwd = Utf8PathBuf::from("/tmp");
+        let mut config = KatachiConfig::default();
+        config.harnesses.insert(
+            "claude".into(),
+            HarnessConfig {
+                enabled: true,
+                binary: None,
+                default_backend: Some("sdk-ts".into()),
+                extra: Default::default(),
+            },
+        );
+
+        let out = resolve(ResolveInputs::new(
+            &req, &def, &modules, &config, &paths, &cwd,
+        ))
+        .unwrap();
+        assert_eq!(out.resolved.backend, BackendKind::SdkPy);
     }
 }
