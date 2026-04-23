@@ -160,6 +160,37 @@ item_ref = { harness = "claude", kind = "skill", id = "axe-runner" }
 }
 
 #[test]
+fn describe_unknown_selector_item_exits_resolve() {
+    let fx = Fixture::new();
+    // Selector references an item the fixture catalog does not contain, so
+    // the resolver emits `selector.unknown-item` at Severity::Error in
+    // `resolved.diagnostics`. Describe must exit non-zero (Resolve).
+    fx.write_katachi(
+        "ghost",
+        r#"
+id = "ghost"
+
+[[targets]]
+harness = "claude"
+backend = "cli"
+
+[[targets.selectors.selectors]]
+type = "item_ref"
+item_ref = { harness = "claude", kind = "plugin", id = "does-not-exist" }
+"#,
+    );
+
+    let out = fx.run(&["have", "ghost", "describe"]);
+    assert_exit(&out, 4);
+
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("selector.unknown-item"),
+        "stdout missing expected diagnostic code: {stdout}"
+    );
+}
+
+#[test]
 fn describe_missing_katachis_dir_exits_resolve() {
     // Build a fixture but delete the katachis dir.
     let td = TempDir::new().unwrap();

@@ -87,6 +87,11 @@ pub fn run_describe(global: &GlobalArgs, have: &HaveCmd) -> Result<ExitCode> {
         &default_validators(),
     );
 
+    // Errors can surface on two channels: resolver-emitted diagnostics
+    // (e.g. `selector.unknown-item`) and validator output. Both must gate
+    // the exit code so broken katachi definitions can't slip past CI with
+    // an error message printed but a 0 status.
+    let has_resolver_errors = any_error(&output.resolved.diagnostics);
     let has_validation_errors = any_error(&validator_diagnostics);
 
     let report = DescribeReport {
@@ -102,7 +107,9 @@ pub fn run_describe(global: &GlobalArgs, have: &HaveCmd) -> Result<ExitCode> {
         render_human(&report);
     }
 
-    if has_validation_errors {
+    if has_resolver_errors {
+        Ok(ExitCode::Resolve)
+    } else if has_validation_errors {
         Ok(ExitCode::Validate)
     } else {
         Ok(ExitCode::Ok)
