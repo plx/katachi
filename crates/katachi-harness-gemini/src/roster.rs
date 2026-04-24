@@ -158,6 +158,11 @@ pub struct RosterRunProfile {
     pub extensions_mode: Option<String>,
     #[serde(default)]
     pub extra_flags: Vec<String>,
+    /// Override the binary invoked by the planner. Primarily used by
+    /// tests (fake gemini scripts) but also valid for users with a
+    /// custom binary path.
+    #[serde(default)]
+    pub binary: Option<String>,
 }
 
 impl RosterRunProfile {
@@ -197,6 +202,9 @@ impl RosterRunProfile {
                         .collect(),
                 ),
             );
+        }
+        if let Some(v) = &self.binary {
+            m.insert("binary".into(), Value::String(v.clone()));
         }
         Value::Object(m)
     }

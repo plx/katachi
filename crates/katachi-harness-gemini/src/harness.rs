@@ -66,6 +66,6 @@ impl HarnessModule for GeminiHarness {
     }
 
     fn execute(&self, ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> {
-        katachi_core::execute::run(ctx)
+        crate::execute::run(ctx)
     }
 }

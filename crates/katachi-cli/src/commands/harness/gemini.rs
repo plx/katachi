@@ -13,15 +13,22 @@ use katachi_core::harness::{
     ExplainContext, ExplainResult, HarnessModule, PlanContext, RosterCatalog, ScanContext,
 };
 use katachi_core::katachi::KatachiDefinition;
-use katachi_core::model::{BackendKind, HarnessKind, ItemRef, MaterializationMode};
+use katachi_core::model::{BackendKind, HarnessKind, ItemRef, MaterializationMode as CoreMatMode};
 use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides, StoragePaths};
 use katachi_core::plan::{ActionRequest, InvocationRequest, PLAN_SCHEMA_VERSION};
 use katachi_core::record::RunId;
 use katachi_core::resolve::{resolve, ResolveInputs};
 use katachi_core::validate::{default_validators, run_validators, ValidateContext};
+use katachi_harness_gemini::config::GeminiConfig;
+use katachi_harness_gemini::extension::ExtensionDiscovery;
+use katachi_harness_gemini::materialize::{materialize_overlay, OverlayManifest};
+use katachi_harness_gemini::plan::{build_cli_plan_with_overlay, GeminiRunProfile};
+use katachi_harness_gemini::policy::ResolvedPolicy;
 use katachi_harness_gemini::roster::{GeminiRoster, GeminiRosterStore};
 use katachi_harness_gemini::scan;
+use katachi_harness_gemini::validate::gemini_validators;
 use katachi_harness_gemini::GeminiHarness;
+use katachi_core::materialize::{KeepPolicy, TempOverlay};
 
 use crate::cli::{
     GlobalArgs, GraphFormat, HarnessAction, HarnessPlanAction, MaterializationArg,
@@ -40,6 +47,8 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
                 HarnessPlanAction::Execute { prompt },
         } => run_plan(global, &roster_id, &prompt),
         HarnessAction::Execute { roster_id, prompt } => run_execute(global, &roster_id, &prompt),
+        HarnessAction::Doctor => run_doctor(global),
+        HarnessAction::DumpSettings { roster_id } => run_dump_settings(global, &roster_id),
     }
 }
 
@@ -352,13 +361,16 @@ pub fn run_plan(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result<Ex
     };
 
     // Emit resolve diagnostics early.
+    let policy = ResolvedPolicy::from_catalog(&out.catalog);
+    let mut validators = default_validators();
+    validators.extend(gemini_validators(policy));
     let validator_diags = run_validators(
         &ValidateContext {
             resolved: &out.resolved,
             catalog: &out.catalog,
             definition: &definition,
         },
-        &default_validators(),
+        &validators,
     );
 
     let plan_ctx = PlanContext {
@@ -476,18 +488,63 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
         }
     };
 
-    let plan_ctx = PlanContext {
-        request: &req,
-        resolved: &out.resolved,
-        run_id: RunId::new(),
+    // Run gemini validators before planning.
+    let policy = ResolvedPolicy::from_catalog(&out.catalog);
+    let mut validators = default_validators();
+    validators.extend(gemini_validators(policy));
+    let validator_diags = run_validators(
+        &ValidateContext {
+            resolved: &out.resolved,
+            catalog: &out.catalog,
+            definition: &definition,
+        },
+        &validators,
+    );
+    if any_error(&validator_diags) {
+        for d in &validator_diags {
+            eprintln!(
+                "katachi harness gemini: [{}] {}: {}",
+                severity_tag(d.severity),
+                d.code,
+                d.message
+            );
+        }
+        return Ok(ExitCode::Validate);
+    }
+
+    // Materialize before planning so the plan can point at the overlay.
+    let (_overlay_handle, overlay_manifest) = match req.materialization {
+        CoreMatMode::TempOverlay => {
+            match build_overlay(&ctx, &out.resolved, &out.catalog) {
+                Ok((ov, m)) => (Some(ov), Some(m)),
+                Err(e) => {
+                    eprintln!("katachi harness gemini: overlay failed: {e}");
+                    return Ok(ExitCode::Plan);
+                }
+            }
+        }
+        CoreMatMode::Ambient => (None, None),
     };
-    let plan = match harness.plan(&plan_ctx) {
+
+    let run_id = RunId::new();
+    let plan = match build_plan_for_execute(
+        &req,
+        &out.resolved,
+        run_id,
+        overlay_manifest.as_ref(),
+    ) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("katachi harness gemini: {e}");
             return Ok(ExitCode::Plan);
         }
     };
+    // Keep plan_ctx name for parity with previous code path.
+    let _ = (&plan, &harness, PlanContext {
+        request: &req,
+        resolved: &out.resolved,
+        run_id,
+    });
 
     let runs_root_utf8 = ctx.storage.runs_dir();
     if let Err(e) = std::fs::create_dir_all(runs_root_utf8.as_std_path()) {
@@ -593,12 +650,282 @@ fn build_request_for_roster(
         .collect();
     if let Some(m) = global.materialization {
         req.materialization = match m {
-            MaterializationArg::Ambient => MaterializationMode::Ambient,
-            MaterializationArg::TempOverlay => MaterializationMode::TempOverlay,
+            MaterializationArg::Ambient => CoreMatMode::Ambient,
+            MaterializationArg::TempOverlay => CoreMatMode::TempOverlay,
         };
     }
     req.dry_run = global.dry_run;
     req
+}
+
+// ---------------- doctor ----------------
+
+pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
+    let ctx = load_ctx(global)?;
+    let gcfg = GeminiConfig::from_katachi(&ctx.config).map_err(|e| anyhow!("{e}"))?;
+    let home = gcfg.resolved_home().map_err(|e| anyhow!("{e}"))?;
+    let extension_roots = gcfg.resolved_extension_roots(&home);
+    let user_roots = gcfg.resolved_user_roots(&home);
+    let project_roots = gcfg.resolved_project_roots(&ctx.cwd);
+
+    #[derive(Serialize)]
+    struct DoctorReport {
+        enabled: bool,
+        binary: String,
+        binary_found: bool,
+        resolved_binary: Option<String>,
+        home: String,
+        user_roots: Vec<String>,
+        project_roots: Vec<String>,
+        extension_roots: Vec<String>,
+        preserve_failed_overlays: bool,
+        treat_preview_features_as_opt_in: bool,
+        extension_count: usize,
+        settings_layers: usize,
+        diagnostics: Vec<Diagnostic>,
+    }
+
+    let catalog = catalog_for(&ctx).unwrap_or_else(|_| katachi_core::harness::RosterCatalog::empty(HarnessKind::Gemini));
+    let extension_count = catalog
+        .iter_items()
+        .filter(|(r, _)| r.kind == "extension")
+        .count();
+    let settings_layers = catalog
+        .iter_items()
+        .filter(|(r, _)| r.kind == "settings_layer")
+        .count();
+    let (binary_found, resolved_binary) = which::which(&gcfg.binary)
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_owned))
+        .map(|p| (true, Some(p)))
+        .unwrap_or((false, None));
+    let report = DoctorReport {
+        enabled: gcfg.enabled,
+        binary: gcfg.binary.clone(),
+        binary_found,
+        resolved_binary,
+        home: home.to_string(),
+        user_roots: user_roots.iter().map(|p| p.to_string()).collect(),
+        project_roots: project_roots.iter().map(|p| p.to_string()).collect(),
+        extension_roots: extension_roots.iter().map(|p| p.to_string()).collect(),
+        preserve_failed_overlays: gcfg.preserve_failed_overlays,
+        treat_preview_features_as_opt_in: gcfg.treat_preview_features_as_opt_in,
+        extension_count,
+        settings_layers,
+        diagnostics: catalog.diagnostics.clone(),
+    };
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &report)?;
+        println!();
+    } else {
+        println!("gemini doctor");
+        println!("  enabled            : {}", report.enabled);
+        println!("  binary             : {}", report.binary);
+        println!(
+            "  binary found       : {}",
+            report
+                .resolved_binary
+                .as_deref()
+                .unwrap_or("not on PATH")
+        );
+        println!("  home               : {}", report.home);
+        println!("  user roots         : {}", report.user_roots.join(", "));
+        println!("  project roots      : {}", report.project_roots.join(", "));
+        println!("  extension roots    : {}", report.extension_roots.join(", "));
+        println!(
+            "  preview opt-in     : {}",
+            report.treat_preview_features_as_opt_in
+        );
+        println!(
+            "  preserve overlays  : {}",
+            report.preserve_failed_overlays
+        );
+        println!();
+        println!(
+            "inventory: {} extensions, {} settings layers",
+            report.extension_count, report.settings_layers
+        );
+        if !report.diagnostics.is_empty() {
+            println!("diagnostics:");
+            for d in &report.diagnostics {
+                println!("  [{}] {}: {}", severity_tag(d.severity), d.code, d.message);
+            }
+        }
+    }
+    Ok(ExitCode::Ok)
+}
+
+// ---------------- dump-settings ----------------
+
+pub fn run_dump_settings(global: &GlobalArgs, roster_id: &str) -> Result<ExitCode> {
+    let ctx = load_ctx(global)?;
+    let roster_store = load_rosters(&ctx)?;
+    let roster = match roster_store.find(roster_id) {
+        Some(r) => r.clone(),
+        None => {
+            eprintln!(
+                "katachi harness gemini: roster `{}` not found under {}",
+                roster_id,
+                rosters_dir(&ctx).display()
+            );
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let definition = roster.to_katachi_definition();
+    let req = build_request_for_roster(global, roster_id, ctx.cwd.clone(), "");
+    let harness = GeminiHarness::new();
+    let modules: Vec<&dyn HarnessModule> = vec![&harness];
+    let inputs = ResolveInputs::new(
+        &req,
+        &definition,
+        &modules,
+        &ctx.config,
+        &ctx.storage,
+        &ctx.cwd,
+    );
+    let out = match resolve(inputs) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("katachi harness gemini: {e}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+
+    // Fold settings layers into a single merged JSON object for easy
+    // inspection. Later-ranked layers override earlier ones per key.
+    let mut merged = serde_json::Map::new();
+    let mut layer_entries: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut settings_items: Vec<(u32, &katachi_core::roster::DiscoveredItem)> = Vec::new();
+    for (_, item) in out.catalog.iter_items() {
+        if item.item_ref.kind != "settings_layer" {
+            continue;
+        }
+        let rank = match item.source.scope.as_deref() {
+            Some("project") => 1,
+            Some("generated") => 2,
+            _ => 0,
+        };
+        settings_items.push((rank, item));
+    }
+    settings_items.sort_by_key(|(r, _)| *r);
+    for (_, item) in &settings_items {
+        let scope = item.source.scope.clone().unwrap_or_default();
+        layer_entries.push((scope, item.raw.clone()));
+        if let Some(obj) = item.raw.as_object() {
+            for (k, v) in obj {
+                merged.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    struct Dump<'a> {
+        roster: &'a str,
+        layers: Vec<Layer<'a>>,
+        effective: serde_json::Value,
+    }
+    #[derive(Serialize)]
+    struct Layer<'a> {
+        scope: &'a str,
+        body: &'a serde_json::Value,
+    }
+    let layers: Vec<Layer<'_>> = layer_entries
+        .iter()
+        .map(|(s, b)| Layer { scope: s, body: b })
+        .collect();
+    let dump = Dump {
+        roster: roster_id,
+        layers,
+        effective: serde_json::Value::Object(merged),
+    };
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &dump)?;
+        println!();
+    } else {
+        println!("roster: {}", dump.roster);
+        for layer in &dump.layers {
+            println!();
+            println!("[{}]", layer.scope);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&layer.body).unwrap_or_default()
+            );
+        }
+        println!();
+        println!("[effective]");
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&dump.effective).unwrap_or_default()
+        );
+    }
+    Ok(ExitCode::Ok)
+}
+
+/// Build an overlay for the selected run. Requires scanning extensions
+/// again because the resolved katachi only carries ItemRefs, not the
+/// source directories the materializer needs for symlinks.
+fn build_overlay(
+    ctx: &Ctx,
+    resolved: &katachi_core::plan::ResolvedKatachi,
+    catalog: &katachi_core::harness::RosterCatalog,
+) -> Result<(TempOverlay, OverlayManifest)> {
+    let gcfg = GeminiConfig::from_katachi(&ctx.config)
+        .map_err(|e| anyhow!("{e}"))?;
+    let home = gcfg.resolved_home().map_err(|e| anyhow!("{e}"))?;
+    let extension_roots = gcfg.resolved_extension_roots(&home);
+    let ext_discovery = ExtensionDiscovery::discover(&extension_roots);
+
+    let (overlay, manifest) = materialize_overlay(
+        resolved,
+        catalog,
+        &ext_discovery.extensions,
+        gcfg.preserve_failed_overlays,
+    )
+    .map_err(|e| anyhow!("{e}"))?;
+    Ok((overlay, manifest))
+}
+
+/// Build the execution plan, merging in overlay information when present.
+fn build_plan_for_execute(
+    req: &InvocationRequest,
+    resolved: &katachi_core::plan::ResolvedKatachi,
+    run_id: RunId,
+    overlay: Option<&OverlayManifest>,
+) -> Result<katachi_core::plan::ExecutionPlan, katachi_core::error::PlanError> {
+    use katachi_core::model::BackendKind;
+    let profile = GeminiRunProfile::from_overlay(&resolved.run_profile.extras);
+    let prompt = match &req.action {
+        ActionRequest::Execute { prompt } | ActionRequest::Plan { prompt } => Some(prompt.as_str()),
+        _ => None,
+    };
+    let selected_extensions: Vec<String> = resolved
+        .selected_items
+        .iter()
+        .filter(|i| i.item.kind == "extension")
+        .map(|i| i.item.id.clone())
+        .collect();
+    match resolved.backend {
+        BackendKind::Cli => build_cli_plan_with_overlay(
+            &PlanContext {
+                request: req,
+                resolved,
+                run_id,
+            },
+            &profile,
+            prompt,
+            &selected_extensions,
+            overlay,
+        ),
+        // Non-CLI backends fall back to the module's default planner path.
+        _ => {
+            let harness = GeminiHarness::new();
+            harness.plan(&PlanContext {
+                request: req,
+                resolved,
+                run_id,
+            })
+        }
+    }
 }
 
 // Keep `scan` reachable even when consumers only import this module.
@@ -606,4 +933,5 @@ fn build_request_for_roster(
 pub(crate) fn _keep_alive() {
     let _ = scan::build_catalog;
     let _: fn() -> GeminiRoster = || unreachable!();
+    let _: fn(KeepPolicy) = |_| {};
 }

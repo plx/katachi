@@ -25,6 +25,8 @@ fn not_implemented(_global: &GlobalArgs, cmd: HarnessCmd) -> Result<ExitCode> {
         HarnessAction::Graph { .. } => "graph",
         HarnessAction::Plan { .. } => "plan",
         HarnessAction::Execute { .. } => "execute",
+        HarnessAction::Doctor => "doctor",
+        HarnessAction::DumpSettings { .. } => "dump-settings",
     };
     eprintln!(
         "katachi: `harness {} {}` is not yet implemented in this phase",

@@ -17,6 +17,7 @@ use katachi_core::plan::{
 };
 
 use crate::item::GeminiItemKind;
+use crate::materialize::OverlayManifest;
 
 /// Default invocation argv and args Gemini CLI understands in headless
 /// mode. Kept centrally so tests can assert on it.
@@ -140,13 +141,36 @@ pub fn build_plan(ctx: &PlanContext<'_>) -> Result<ExecutionPlan, PlanError> {
     }
 }
 
+/// Read the binary name from the run profile's `extras` (defaults to
+/// `gemini`). Surfaces as `binary` in the roster's `[run_profile]`
+/// section so tests can point at a fake executable.
+pub fn binary_name_from_overlay(extras: &Value) -> String {
+    extras
+        .get("binary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("gemini")
+        .to_owned()
+}
+
 fn build_cli_plan(
     ctx: &PlanContext<'_>,
     profile: &GeminiRunProfile,
     prompt: Option<&str>,
     selected_extensions: &[String],
 ) -> Result<ExecutionPlan, PlanError> {
-    let binary = "gemini".to_string();
+    build_cli_plan_with_overlay(ctx, profile, prompt, selected_extensions, None)
+}
+
+/// Build a CLI plan optionally integrating a materialized overlay's
+/// manifest (env overrides + recorded files).
+pub fn build_cli_plan_with_overlay(
+    ctx: &PlanContext<'_>,
+    profile: &GeminiRunProfile,
+    prompt: Option<&str>,
+    selected_extensions: &[String],
+    overlay: Option<&OverlayManifest>,
+) -> Result<ExecutionPlan, PlanError> {
+    let binary = binary_name_from_overlay(&ctx.resolved.run_profile.extras);
     let output_format = profile.output_format_or_default();
     let approval_mode = profile.approval_mode_or_default();
 
@@ -208,13 +232,25 @@ fn build_cli_plan(
         _ => TranscriptMode::RawOnly,
     };
 
-    let materialization = materialization_plan(ctx.request.materialization);
+    let materialization = match overlay {
+        Some(m) => crate::materialize::to_materialization_plan(m),
+        None => materialization_plan(ctx.request.materialization),
+    };
+    let cwd = overlay
+        .map(|m| m.project_dir.clone())
+        .unwrap_or_else(|| ctx.request.cwd.clone());
+    let mut env = BTreeMap::new();
+    if let Some(m) = overlay {
+        for (k, v) in &m.env {
+            env.insert(k.clone(), v.clone());
+        }
+    }
     let exec = ExecutionBackendPlan {
         backend: BackendKind::Cli,
         argv,
         stdin_input: None,
-        env: BTreeMap::new(),
-        cwd: Some(ctx.request.cwd.clone()),
+        env,
+        cwd: Some(cwd),
         timeout_secs: None,
     };
 
@@ -243,7 +279,8 @@ fn build_sdk_ts_plan(
     prompt: Option<&str>,
     _selected_extensions: &[String],
 ) -> Result<ExecutionPlan, PlanError> {
-    // Reject unsupported features.
+    // Reject unsupported features. Error messages use the exact names
+    // listed in the implementation spec so documentation stays stable.
     let unsupported: Vec<&str> = ctx
         .resolved
         .selected_items
@@ -268,11 +305,29 @@ fn build_sdk_ts_plan(
             ),
         });
     }
+
+    // Supported selection kinds pass through. Surface a warning via the
+    // plan summary if the selection is empty (an SDK-ts call with no
+    // configured tools is legal but unusual).
     let prompt = prompt.unwrap_or("").to_owned();
     let model = profile
         .model
         .clone()
         .unwrap_or_else(|| "gemini-3-pro".to_owned());
+    let skills: Vec<String> = ctx
+        .resolved
+        .selected_items
+        .iter()
+        .filter(|i| i.item.kind == "skill")
+        .map(|i| i.item.id.clone())
+        .collect();
+    let contexts: Vec<String> = ctx
+        .resolved
+        .selected_items
+        .iter()
+        .filter(|i| i.item.kind == "context_source")
+        .map(|i| i.item.id.clone())
+        .collect();
     let payload = serde_json::json!({
         "sdk": "@google/gemini-cli-sdk",
         "model": model,
@@ -283,9 +338,15 @@ fn build_sdk_ts_plan(
             .iter()
             .map(|p| p.to_string())
             .collect::<Vec<_>>(),
+        "skills": skills,
+        "contexts": contexts,
     });
+    let binary = binary_name_from_overlay(&ctx.resolved.run_profile.extras);
+    // Use a configurable wrapper binary (defaults to `node`) so tests
+    // can point at a fake entrypoint.
+    let argv0 = if binary == "gemini" { "node".to_owned() } else { binary.clone() };
     let argv = vec![
-        "node".into(),
+        argv0,
         "-e".into(),
         format!(
             "require('@google/gemini-cli-sdk').run({});",
@@ -295,7 +356,7 @@ fn build_sdk_ts_plan(
     Ok(ExecutionPlan {
         schema_version: PLAN_SCHEMA_VERSION,
         run_id: ctx.run_id,
-        summary: format!("gemini sdk-ts (model={model})"),
+        summary: format!("gemini sdk-ts (model={model}, skills={})", skills.len()),
         harness: ctx.resolved.harness,
         backend: BackendKind::SdkTs,
         materialization: MaterializationPlan::ambient(),
@@ -497,6 +558,65 @@ mod tests {
         };
         let plan = build_plan(&ctx).unwrap();
         assert_eq!(plan.backend, BackendKind::SdkTs);
+        assert!(plan.summary.contains("skills=1"));
+    }
+
+    #[test]
+    fn sdk_ts_accepts_context_and_settings_only() {
+        let res = resolved(
+            BackendKind::SdkTs,
+            vec![
+                "context_source:context:project:GEMINI.md",
+                "settings_layer:settings:user",
+            ],
+            json!({"model": "gemini-3-pro"}),
+        );
+        let req = request("hello");
+        let ctx = PlanContext {
+            request: &req,
+            resolved: &res,
+            run_id: RunId::new(),
+        };
+        let plan = build_plan(&ctx).unwrap();
+        assert_eq!(plan.backend, BackendKind::SdkTs);
+    }
+
+    #[test]
+    fn sdk_ts_rejects_subagent_and_hook() {
+        let cases = vec![
+            vec!["subagent:explorer"],
+            vec!["hook_set:a11y"],
+            vec!["policy_set:readonly"],
+        ];
+        for items in cases {
+            let res = resolved(BackendKind::SdkTs, items.clone(), json!({}));
+            let req = request("x");
+            let ctx = PlanContext {
+                request: &req,
+                resolved: &res,
+                run_id: RunId::new(),
+            };
+            let err = build_plan(&ctx).unwrap_err();
+            match err {
+                PlanError::ProjectionLoss { backend, .. } => {
+                    assert_eq!(backend, "sdk-ts", "case: {items:?}");
+                }
+                _ => panic!("wrong err variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn sdk_ts_empty_selection_is_still_legal() {
+        let res = resolved(BackendKind::SdkTs, vec![], json!({}));
+        let req = request("");
+        let ctx = PlanContext {
+            request: &req,
+            resolved: &res,
+            run_id: RunId::new(),
+        };
+        let plan = build_plan(&ctx).unwrap();
+        assert!(plan.summary.contains("skills=0"));
     }
 
     #[test]

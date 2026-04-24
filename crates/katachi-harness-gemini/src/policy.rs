@@ -206,6 +206,47 @@ impl ResolvedPolicy {
         out
     }
 
+    /// Derive a ResolvedPolicy from a freshly-scanned catalog. Uses raw
+    /// payloads of `settings_layer` items (ordered by precedence) and
+    /// `policy_set` items keyed by extension ownership.
+    pub fn from_catalog(catalog: &katachi_core::roster::RosterCatalog) -> Self {
+        let mut settings_values = Vec::new();
+        let mut settings_items: Vec<(&katachi_core::roster::DiscoveredItem, u32)> = Vec::new();
+        for (_, item) in catalog.iter_items() {
+            if item.item_ref.kind == crate::item::GeminiItemKind::SettingsLayer.as_str() {
+                let rank = item
+                    .raw
+                    .get("rank")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or_else(|| match item.source.scope.as_deref() {
+                        Some("project") => 1,
+                        Some("generated") => 2,
+                        _ => 0,
+                    }) as u32;
+                settings_items.push((item, rank));
+            }
+        }
+        settings_items.sort_by_key(|(_, r)| *r);
+        for (item, _) in &settings_items {
+            settings_values.push(&item.raw);
+        }
+
+        let mut extension_policies: Vec<&Value> = Vec::new();
+        for (_, item) in catalog.iter_items() {
+            if item.item_ref.kind == crate::item::GeminiItemKind::PolicySet.as_str() {
+                if matches!(
+                    item.source.scope.as_deref(),
+                    Some("extension")
+                ) {
+                    if let Some(body) = item.raw.get("body") {
+                        extension_policies.push(body);
+                    }
+                }
+            }
+        }
+        Self::resolve(&settings_values, &extension_policies)
+    }
+
     /// Is `extension_name` allowed to load under this policy?
     pub fn extension_allowed(&self, extension_name: &str) -> bool {
         if self.extensions_disabled {
@@ -380,5 +421,41 @@ mod tests {
         let user = serde_json::json!({"experimental": true});
         let pol = ResolvedPolicy::resolve(&[&user], &[]);
         assert!(pol.preview_features_enabled);
+    }
+
+    #[test]
+    fn from_catalog_folds_settings_and_extension_policies() {
+        use katachi_core::model::{HarnessKind, ItemRef};
+        use katachi_core::roster::{DiscoveredItem, ItemSource, RosterCatalog};
+        let mut cat = RosterCatalog::empty(HarnessKind::Gemini);
+        cat.insert_item(DiscoveredItem {
+            item_ref: ItemRef::new(HarnessKind::Gemini, "settings_layer", "settings:user"),
+            display_name: "user".into(),
+            source: ItemSource {
+                scope: Some("user".into()),
+                ..Default::default()
+            },
+            packaging: None,
+            raw: serde_json::json!({"admin": {"disableExtensions": true}}),
+            capabilities: Vec::new(),
+            constraints: Vec::new(),
+        })
+        .unwrap();
+        cat.insert_item(DiscoveredItem {
+            item_ref: ItemRef::new(HarnessKind::Gemini, "policy_set", "guard"),
+            display_name: "guard".into(),
+            source: ItemSource {
+                scope: Some("extension".into()),
+                ..Default::default()
+            },
+            packaging: None,
+            raw: serde_json::json!({"body": {"blockedExtensions": ["evil"]}}),
+            capabilities: Vec::new(),
+            constraints: Vec::new(),
+        })
+        .unwrap();
+        let pol = ResolvedPolicy::from_catalog(&cat);
+        assert!(pol.extensions_disabled);
+        assert!(pol.blocked_extensions.iter().any(|s| s == "evil"));
     }
 }

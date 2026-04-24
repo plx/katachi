@@ -7,10 +7,12 @@
 
 pub mod config;
 pub mod context;
+pub mod execute;
 pub mod extension;
 pub mod harness;
 pub mod hook;
 pub mod item;
+pub mod materialize;
 pub mod mcp;
 pub mod plan;
 pub mod policy;
@@ -20,6 +22,7 @@ pub mod settings;
 pub mod skill;
 pub mod subagent;
 pub mod transcript;
+pub mod validate;
 
 pub use harness::GeminiHarness;
 pub use item::{GeminiEdgeKind, GeminiItemKind};

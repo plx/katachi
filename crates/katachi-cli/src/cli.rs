@@ -216,6 +216,13 @@ pub enum HarnessAction {
         roster_id: String,
         prompt: String,
     },
+    /// Harness-specific environment diagnostics.
+    Doctor,
+    /// Dump effective settings for a roster (useful for debugging).
+    DumpSettings {
+        #[arg(value_name = "ROSTER_ID")]
+        roster_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
