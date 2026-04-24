@@ -12,13 +12,23 @@ use serde::Serialize;
 use katachi_core::config;
 use katachi_core::diagnostic::{Diagnostic, Severity};
 use katachi_core::harness::{ExplainContext, HarnessModule, ScanContext};
-use katachi_core::model::{BackendKind, ItemRef};
+use katachi_core::model::{BackendKind, ItemRef, MaterializationMode};
 use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides};
+use katachi_core::persist::RunDirectory;
+use katachi_core::plan::{ActionRequest, ExecutionPlan, InvocationRequest};
+use katachi_core::record::RunId;
 
+use katachi_harness_claude::config::ClaudeConfig;
+use katachi_harness_claude::plan::{
+    build_claude_plan, materialize_overlay, ClaudePlanInputs, MaterializedOverlay,
+};
+use katachi_harness_claude::resolve::{resolve_roster, validate, ResolvedClaudeRoster};
+use katachi_harness_claude::roster::ClaudeRosterStore;
 use katachi_harness_claude::ClaudeHarness;
 
 use crate::cli::{
     GlobalArgs, GraphFormat, HarnessAction, HarnessCmd, HarnessName, HarnessPlanAction,
+    MaterializationArg,
 };
 use crate::exit::ExitCode;
 
@@ -35,8 +45,15 @@ pub fn run(global: &GlobalArgs, cmd: &HarnessCmd) -> Result<ExitCode> {
     }
 }
 
-fn run_claude(global: &GlobalArgs, action: &HarnessAction) -> Result<ExitCode> {
-    let harness = ClaudeHarness::new();
+struct ClaudeCtx {
+    harness: ClaudeHarness,
+    config: config::KatachiConfig,
+    claude_config: ClaudeConfig,
+    storage: katachi_core::paths::StoragePaths,
+    cwd: Utf8PathBuf,
+}
+
+fn build_ctx(global: &GlobalArgs) -> Result<ClaudeCtx> {
     let overrides = PathOverrides {
         config_file: global.config.clone(),
         data_root: global.data_root.clone(),
@@ -46,100 +63,364 @@ fn run_claude(global: &GlobalArgs, action: &HarnessAction) -> Result<ExitCode> {
     let load = config::load(config_path)?;
     let storage = resolve_storage_paths(&overrides, &load.config.storage)?;
     let cwd = resolve_cwd(global)?;
+    let claude_config = ClaudeConfig::from_shared(&load.config);
+    Ok(ClaudeCtx {
+        harness: ClaudeHarness::new(),
+        config: load.config,
+        claude_config,
+        storage,
+        cwd,
+    })
+}
 
+fn run_claude(global: &GlobalArgs, action: &HarnessAction) -> Result<ExitCode> {
+    let ctx = build_ctx(global)?;
     match action {
-        HarnessAction::Scan => {
-            let ctx = ScanContext {
-                config: &load.config,
-                paths: &storage,
-                cwd: &cwd,
-            };
-            let catalog = harness.scan(&ctx).map_err(|err| anyhow!("{err:#}"))?;
-            render_scan(global, &catalog)
-        }
-        HarnessAction::Explain { item_id } => {
-            let ctx = ScanContext {
-                config: &load.config,
-                paths: &storage,
-                cwd: &cwd,
-            };
-            let catalog = harness.scan(&ctx).map_err(|err| anyhow!("{err:#}"))?;
-            let item_ref = resolve_item_ref(item_id, &catalog)?;
-            let explain_ctx = ExplainContext {
-                item: &item_ref,
-                catalog: &catalog,
-                cwd: &cwd,
-            };
-            match harness.explain(&explain_ctx) {
-                Ok(res) => {
-                    render_explain(global, &res);
-                    Ok(ExitCode::Ok)
-                }
-                Err(err) => {
-                    eprintln!("katachi harness claude explain: {err:#}");
-                    Ok(ExitCode::Resolve)
-                }
-            }
-        }
-        HarnessAction::Graph { format } => {
-            let ctx = ScanContext {
-                config: &load.config,
-                paths: &storage,
-                cwd: &cwd,
-            };
-            let catalog = harness.scan(&ctx).map_err(|err| anyhow!("{err:#}"))?;
-            render_graph(global, &catalog, *format);
-            Ok(ExitCode::Ok)
-        }
+        HarnessAction::Scan => run_scan(global, &ctx),
+        HarnessAction::Explain { item_id } => run_explain(global, &ctx, item_id),
+        HarnessAction::Graph { format } => run_graph(global, &ctx, *format),
         HarnessAction::Plan { roster_id, what } => match what {
-            HarnessPlanAction::Execute { prompt } => run_plan(
-                global,
-                &harness,
-                &load.config,
-                &storage,
-                &cwd,
-                roster_id,
-                prompt,
-            ),
+            HarnessPlanAction::Execute { prompt } => {
+                run_plan(global, &ctx, roster_id, Some(prompt))
+            }
         },
-        HarnessAction::Execute { roster_id, prompt } => run_execute(
-            global,
-            &harness,
-            &load.config,
-            &storage,
-            &cwd,
-            roster_id,
-            prompt,
-        ),
+        HarnessAction::Execute { roster_id, prompt } => {
+            run_execute(global, &ctx, roster_id, prompt)
+        }
     }
 }
 
+fn run_scan(global: &GlobalArgs, ctx: &ClaudeCtx) -> Result<ExitCode> {
+    let catalog = ctx
+        .harness
+        .scan(&ScanContext {
+            config: &ctx.config,
+            paths: &ctx.storage,
+            cwd: &ctx.cwd,
+        })
+        .map_err(|err| anyhow!("{err:#}"))?;
+    render_scan(global, &catalog)
+}
+
+fn run_explain(global: &GlobalArgs, ctx: &ClaudeCtx, item_id: &str) -> Result<ExitCode> {
+    let catalog = ctx
+        .harness
+        .scan(&ScanContext {
+            config: &ctx.config,
+            paths: &ctx.storage,
+            cwd: &ctx.cwd,
+        })
+        .map_err(|err| anyhow!("{err:#}"))?;
+    let item_ref = resolve_item_ref(item_id, &catalog)?;
+    match ctx.harness.explain(&ExplainContext {
+        item: &item_ref,
+        catalog: &catalog,
+        cwd: &ctx.cwd,
+    }) {
+        Ok(res) => {
+            render_explain(global, &res);
+            Ok(ExitCode::Ok)
+        }
+        Err(err) => {
+            eprintln!("katachi harness claude explain: {err:#}");
+            Ok(ExitCode::Resolve)
+        }
+    }
+}
+
+fn run_graph(global: &GlobalArgs, ctx: &ClaudeCtx, format: GraphFormat) -> Result<ExitCode> {
+    let catalog = ctx
+        .harness
+        .scan(&ScanContext {
+            config: &ctx.config,
+            paths: &ctx.storage,
+            cwd: &ctx.cwd,
+        })
+        .map_err(|err| anyhow!("{err:#}"))?;
+    render_graph(global, &catalog, format);
+    Ok(ExitCode::Ok)
+}
+
+fn resolve_for_roster(
+    global: &GlobalArgs,
+    ctx: &ClaudeCtx,
+    roster_id: &str,
+) -> Result<(ResolvedClaudeRoster, InvocationRequest)> {
+    let store = ClaudeRosterStore::load_default(&ctx.storage, &ctx.claude_config)
+        .map_err(|err| anyhow!("load rosters: {err:#}"))?;
+    let roster = store
+        .require(roster_id)
+        .map_err(|err| anyhow!("{err:#}"))?
+        .clone();
+    let catalog = ctx
+        .harness
+        .scan(&ScanContext {
+            config: &ctx.config,
+            paths: &ctx.storage,
+            cwd: &ctx.cwd,
+        })
+        .map_err(|err| anyhow!("{err:#}"))?;
+    let backend = resolve_backend(global, &roster);
+    let resolved = resolve_roster(&roster, catalog, backend);
+    let action = ActionRequest::Describe;
+    let request = InvocationRequest::new(roster_id, action, ctx.cwd.clone());
+    Ok((resolved, request))
+}
+
+fn resolve_backend(
+    global: &GlobalArgs,
+    roster: &katachi_harness_claude::roster::ClaudeRoster,
+) -> BackendKind {
+    // CLI `--prefer-backend` wins over roster/config defaults.
+    for b in &global.prefer_backend {
+        if let Ok(parsed) = b.parse::<BackendKind>() {
+            return parsed;
+        }
+    }
+    if let Some(b) = roster.backend() {
+        return b;
+    }
+    BackendKind::Cli
+}
+
+fn build_plan_from_resolved(
+    global: &GlobalArgs,
+    ctx: &ClaudeCtx,
+    resolved: &ResolvedClaudeRoster,
+    prompt: Option<&str>,
+) -> Result<ExecutionPlan> {
+    let materialization = match global.materialization {
+        Some(MaterializationArg::Ambient) => MaterializationMode::Ambient,
+        Some(MaterializationArg::TempOverlay) => MaterializationMode::TempOverlay,
+        None => resolved.roster.materialization_mode(),
+    };
+    let run_id = RunId::new();
+    let plan = build_claude_plan(ClaudePlanInputs {
+        resolved_roster: resolved,
+        config: &ctx.claude_config,
+        cwd: &ctx.cwd,
+        run_id,
+        materialization,
+        prompt: prompt.map(str::to_string),
+    })
+    .map_err(|err| anyhow!("{err:#}"))?;
+    Ok(plan)
+}
+
 fn run_plan(
-    _global: &GlobalArgs,
-    _harness: &ClaudeHarness,
-    _config: &config::KatachiConfig,
-    _storage: &katachi_core::paths::StoragePaths,
-    _cwd: &Utf8PathBuf,
-    _roster_id: &str,
-    _prompt: &str,
+    global: &GlobalArgs,
+    ctx: &ClaudeCtx,
+    roster_id: &str,
+    prompt: Option<&str>,
 ) -> Result<ExitCode> {
-    // Planner wiring lands in Step 10.
-    eprintln!("katachi: `harness claude plan` is not yet fully wired");
-    Ok(ExitCode::NotImplemented)
+    let (resolved, _request) = match resolve_for_roster(global, ctx, roster_id) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("katachi harness claude plan: {err:#}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let validator_diags = validate(&resolved);
+    let resolve_errors = resolved
+        .resolved
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error);
+    let validation_errors = validator_diags
+        .iter()
+        .any(|d| d.severity == Severity::Error);
+    if resolve_errors {
+        render_diagnostics(global, &resolved.resolved.diagnostics, &validator_diags);
+        return Ok(ExitCode::Resolve);
+    }
+    if validation_errors {
+        render_diagnostics(global, &resolved.resolved.diagnostics, &validator_diags);
+        return Ok(ExitCode::Validate);
+    }
+
+    let plan = match build_plan_from_resolved(global, ctx, &resolved, prompt) {
+        Ok(plan) => plan,
+        Err(err) => {
+            eprintln!("katachi harness claude plan: {err:#}");
+            return Ok(ExitCode::Plan);
+        }
+    };
+    render_plan(global, &plan, &resolved, &validator_diags);
+    Ok(ExitCode::Ok)
 }
 
 fn run_execute(
-    _global: &GlobalArgs,
-    _harness: &ClaudeHarness,
-    _config: &config::KatachiConfig,
-    _storage: &katachi_core::paths::StoragePaths,
-    _cwd: &Utf8PathBuf,
-    _roster_id: &str,
-    _prompt: &str,
+    global: &GlobalArgs,
+    ctx: &ClaudeCtx,
+    roster_id: &str,
+    prompt: &str,
 ) -> Result<ExitCode> {
-    // Executor wiring lands in Step 11.
-    eprintln!("katachi: `harness claude execute` is not yet fully wired");
-    Ok(ExitCode::NotImplemented)
+    let (resolved, _request_template) = match resolve_for_roster(global, ctx, roster_id) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("katachi harness claude execute: {err:#}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let validator_diags = validate(&resolved);
+    if resolved
+        .resolved
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+    {
+        render_diagnostics(global, &resolved.resolved.diagnostics, &validator_diags);
+        return Ok(ExitCode::Resolve);
+    }
+    if validator_diags.iter().any(|d| d.severity == Severity::Error) {
+        render_diagnostics(global, &resolved.resolved.diagnostics, &validator_diags);
+        return Ok(ExitCode::Validate);
+    }
+
+    let plan = match build_plan_from_resolved(global, ctx, &resolved, Some(prompt)) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("katachi harness claude execute: {err:#}");
+            return Ok(ExitCode::Plan);
+        }
+    };
+
+    if global.dry_run {
+        render_plan(global, &plan, &resolved, &validator_diags);
+        return Ok(ExitCode::Ok);
+    }
+
+    // Materialize overlay (if any) and spawn the CLI.
+    let overlay = if matches!(plan.materialization.mode, MaterializationMode::TempOverlay)
+        && !plan.materialization.files.is_empty()
+    {
+        match materialize_overlay(&plan.materialization) {
+            Ok(o) => Some(o),
+            Err(err) => {
+                eprintln!("katachi harness claude execute: overlay failed: {err:#}");
+                return Ok(ExitCode::Execute);
+            }
+        }
+    } else {
+        None
+    };
+
+    // Build run directory.
+    let run_id = plan.run_id;
+    let runs_dir = ctx.storage.runs_dir();
+    let run_dir = match RunDirectory::create(&runs_dir, run_id) {
+        Ok(d) => d,
+        Err(err) => {
+            eprintln!("katachi harness claude execute: {err:#}");
+            cleanup_overlay(overlay, ctx.claude_config.preserve_failed_overlays, false);
+            return Ok(ExitCode::Execute);
+        }
+    };
+    let request = build_execute_request(global, roster_id, prompt, &ctx.cwd);
+    if let Err(err) = run_dir.write_request(&request) {
+        eprintln!("katachi harness claude execute: {err:#}");
+        cleanup_overlay(overlay, ctx.claude_config.preserve_failed_overlays, false);
+        return Ok(ExitCode::Execute);
+    }
+    if let Err(err) = run_dir.write_plan(&plan) {
+        eprintln!("katachi harness claude execute: {err:#}");
+        cleanup_overlay(overlay, ctx.claude_config.preserve_failed_overlays, false);
+        return Ok(ExitCode::Execute);
+    }
+
+    let exec_ctx = katachi_core::harness::ExecuteContext {
+        request: &request,
+        plan: &plan,
+        run_dir: &run_dir,
+        started_at: time::OffsetDateTime::now_utc(),
+    };
+    let record_result = ctx.harness.execute(&exec_ctx);
+    // Always write manifest before committing.
+    let _ = run_dir.write_manifest();
+
+    let exit = match &record_result {
+        Ok(rec) => match rec.result.outcome {
+            katachi_core::record::Outcome::Success => ExitCode::Ok,
+            katachi_core::record::Outcome::Failure
+            | katachi_core::record::Outcome::Timeout
+            | katachi_core::record::Outcome::Planned => ExitCode::Execute,
+        },
+        Err(err) => {
+            eprintln!("katachi harness claude execute: {err:#}");
+            ExitCode::Execute
+        }
+    };
+
+    // Commit on success, leave partial on failure (preserves diagnostics).
+    if matches!(exit, ExitCode::Ok) {
+        match run_dir.commit() {
+            Ok(_) => {}
+            Err(err) => eprintln!("katachi harness claude execute: commit failed: {err:#}"),
+        }
+    }
+
+    cleanup_overlay(
+        overlay,
+        ctx.claude_config.preserve_failed_overlays,
+        matches!(exit, ExitCode::Ok),
+    );
+    Ok(exit)
+}
+
+fn cleanup_overlay(
+    overlay: Option<MaterializedOverlay>,
+    preserve_on_failure: bool,
+    success: bool,
+) {
+    let Some(overlay) = overlay else { return };
+    if !success && preserve_on_failure {
+        if let MaterializedOverlay::Fixed { root } = &overlay {
+            eprintln!("katachi: preserved overlay for post-mortem at `{root}`");
+        }
+        // TempOverlay already lives in a system tempdir; leak it.
+        if let MaterializedOverlay::Temp(mut t) = overlay {
+            t.set_keep(katachi_core::materialize::KeepPolicy::Keep);
+        }
+        return;
+    }
+    if let Err(err) = overlay.cleanup() {
+        eprintln!("katachi: failed to clean up overlay: {err:#}");
+    }
+}
+
+fn build_execute_request(
+    global: &GlobalArgs,
+    roster_id: &str,
+    prompt: &str,
+    cwd: &Utf8PathBuf,
+) -> InvocationRequest {
+    let preferred_harnesses: Vec<_> = global
+        .prefer_harness
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let preferred_backends: Vec<_> = global
+        .prefer_backend
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let mut req = InvocationRequest::new(
+        roster_id,
+        ActionRequest::Execute {
+            prompt: prompt.to_string(),
+        },
+        cwd.clone(),
+    );
+    req.preferred_harnesses = preferred_harnesses;
+    req.preferred_backends = preferred_backends;
+    if let Some(m) = global.materialization {
+        req.materialization = match m {
+            MaterializationArg::Ambient => MaterializationMode::Ambient,
+            MaterializationArg::TempOverlay => MaterializationMode::TempOverlay,
+        };
+    }
+    req.dry_run = global.dry_run;
+    req
 }
 
 fn resolve_cwd(global: &GlobalArgs) -> Result<Utf8PathBuf> {
@@ -157,7 +438,6 @@ fn resolve_item_ref(raw: &str, catalog: &katachi_core::harness::RosterCatalog) -
             return Ok(parsed);
         }
     }
-    // Short forms: `kind:id` or plain `id` (scanning all kinds).
     if let Some((kind, id)) = raw.split_once(':') {
         for (ir, _) in catalog.iter_items() {
             if ir.kind == kind && ir.id == id {
@@ -181,7 +461,10 @@ fn resolve_item_ref(raw: &str, catalog: &katachi_core::harness::RosterCatalog) -
     Err(anyhow!("no discovered item matches `{raw}`"))
 }
 
-fn render_scan(global: &GlobalArgs, catalog: &katachi_core::harness::RosterCatalog) -> Result<ExitCode> {
+fn render_scan(
+    global: &GlobalArgs,
+    catalog: &katachi_core::harness::RosterCatalog,
+) -> Result<ExitCode> {
     if global.json {
         serde_json::to_writer_pretty(std::io::stdout(), catalog)?;
         println!();
@@ -271,6 +554,63 @@ fn render_graph(
     }
 }
 
+fn render_plan(
+    global: &GlobalArgs,
+    plan: &ExecutionPlan,
+    resolved: &ResolvedClaudeRoster,
+    validator_diags: &[Diagnostic],
+) {
+    if global.json {
+        let payload = serde_json::json!({
+            "plan": plan,
+            "resolved": resolved.resolved,
+            "validator_diagnostics": validator_diags,
+            "projection_diagnostics": resolved.projection_diagnostics,
+        });
+        let _ = serde_json::to_writer_pretty(std::io::stdout(), &payload);
+        println!();
+    } else {
+        println!("claude plan: {}", plan.summary);
+        println!("backend: {} ({})", plan.backend, plan.harness);
+        println!(
+            "materialization: {:?} ({} file(s))",
+            plan.materialization.mode,
+            plan.materialization.files.len()
+        );
+        if let Some(root) = &plan.materialization.overlay_root {
+            println!("overlay_root: {root}");
+        }
+        println!("argv:");
+        for (i, a) in plan.execution.argv.iter().enumerate() {
+            println!("  [{i}] {a}");
+        }
+        if let Some(cwd) = &plan.execution.cwd {
+            println!("cwd: {cwd}");
+        }
+        if !plan.execution.env.is_empty() {
+            println!("env:");
+            for (k, v) in &plan.execution.env {
+                println!("  {k}={v}");
+            }
+        }
+        render_diagnostics(global, &resolved.resolved.diagnostics, validator_diags);
+    }
+}
+
+fn render_diagnostics(
+    _global: &GlobalArgs,
+    resolver: &[Diagnostic],
+    validator: &[Diagnostic],
+) {
+    if resolver.is_empty() && validator.is_empty() {
+        return;
+    }
+    println!("diagnostics:");
+    for d in resolver.iter().chain(validator.iter()) {
+        println!("  [{}] {}: {}", severity_tag(d.severity), d.code, d.message);
+    }
+}
+
 #[derive(Serialize)]
 struct GraphWire<'a> {
     items: Vec<&'a ItemRef>,
@@ -324,9 +664,4 @@ fn severity_tag(sev: Severity) -> &'static str {
         Severity::Warning => "warn ",
         Severity::Info => "info ",
     }
-}
-
-#[allow(dead_code)]
-fn backend_or_default(kind: Option<BackendKind>) -> BackendKind {
-    kind.unwrap_or(BackendKind::Cli)
 }

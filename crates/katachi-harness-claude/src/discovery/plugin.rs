@@ -91,6 +91,36 @@ fn scan_plugin_dir(
         None
     };
 
+    // Skip dirs that don't look like plugins: no manifest file at all
+    // and no conventional subdirs. These are typically marketplace
+    // scratch dirs (`cache/`, `repos/`, `.install-manifests/`) that
+    // shouldn't pollute the roster. Dirs whose name starts with `.`
+    // are always skipped. A manifest file that *exists* but failed to
+    // parse still counts as a "this is a plugin dir" signal — the
+    // user will see the parse diagnostic and can fix it.
+    if dir
+        .file_name()
+        .map(|n| n.starts_with('.'))
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let has_conventional_subdir = [
+        "skills",
+        "agents",
+        "hooks",
+        "mcps",
+        "mcp-servers",
+        "mcp_servers",
+        "output-styles",
+        "commands",
+    ]
+    .iter()
+    .any(|name| dir.join(name).exists());
+    if !manifest_path.exists() && !has_conventional_subdir {
+        return Ok(());
+    }
+
     let id = manifest
         .as_ref()
         .and_then(|m| m.id.clone())
@@ -780,12 +810,27 @@ mod tests {
     fn plugin_with_no_manifest_uses_directory_name() {
         let td = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(td.path().to_path_buf()).unwrap();
-        fs::create_dir_all(root.join("manifest-less-plugin")).unwrap();
+        let plugin = root.join("manifest-less-plugin");
+        // Conventional subdir so the scanner recognizes this as a plugin
+        // rather than a scratch dir like `cache/` or `repos/`.
+        fs::create_dir_all(plugin.join("skills")).unwrap();
 
         let catalog = scan_with_plugin_root(root, ClaudeScope::PluginProject);
         assert_eq!(catalog.items.len(), 1);
         let ir = catalog.items.keys().next().unwrap();
         assert_eq!(ir.id, "manifest-less-plugin");
+    }
+
+    #[test]
+    fn dirs_without_manifest_or_conventional_subdirs_are_skipped() {
+        let td = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(td.path().to_path_buf()).unwrap();
+        fs::create_dir_all(root.join("cache")).unwrap();
+        fs::create_dir_all(root.join("repos")).unwrap();
+        fs::create_dir_all(root.join(".install-manifests")).unwrap();
+
+        let catalog = scan_with_plugin_root(root, ClaudeScope::PluginUser);
+        assert!(catalog.items.is_empty());
     }
 
     #[test]
@@ -900,7 +945,9 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "claude.plugin-manifest-parse"));
-        // Plugin item is still emitted using the directory name.
+        // Plugin item is still emitted using the directory name, since
+        // a (malformed) manifest is a strong signal this is a plugin
+        // dir even if we can't parse it.
         assert!(catalog.iter_items().any(|(ir, _)| ir.id == "bad"));
     }
 }
