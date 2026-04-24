@@ -1,0 +1,56 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/katachi-cli",
+    "crates/katachi-core",
+    "crates/katachi-harness-claude",
+    "crates/katachi-harness-codex",
+    "crates/katachi-harness-gemini",
+    "crates/katachi-test-support",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+repository = "https://github.com/plx/katachi"
+
+[workspace.dependencies]
+anyhow = "1.0"
+camino = { version = "1.1", features = ["serde1"] }
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+dirs = "5.0"
+globset = "0.4"
+indexmap = { version = "2.2", features = ["serde"] }
+petgraph = "0.6"
+regex = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.10"
+thiserror = "1.0"
+time = { version = "0.3", features = ["serde", "serde-well-known", "formatting", "parsing", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "time", "sync"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1.8", features = ["v7", "serde"] }
+which = "6"
+
+# Dev dependencies
+insta = { version = "1.39", features = ["json", "yaml", "redactions"] }
+
+# Workspace-local crates (referenced via path in member manifests).
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Start conservative; tighten as we gain confidence.
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

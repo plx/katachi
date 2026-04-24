@@ -1,0 +1,39 @@
+[package]
+name = "katachi-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "katachi command-line interface."
+
+[[bin]]
+name = "katachi"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+katachi-core = { path = "../katachi-core" }
+# Phase 3+: real harness modules. Phase 2 stubs live in each crate's `lib.rs`
+# until per-harness scan/resolve/plan/execute work lands.
+katachi-harness-claude = { path = "../katachi-harness-claude" }
+katachi-harness-codex = { path = "../katachi-harness-codex" }
+katachi-harness-gemini = { path = "../katachi-harness-gemini" }
+# Phase 2: the only working HarnessModule impl lives in test-support, gated by
+# the `KATACHI_FIXTURE_HARNESSES` env var at runtime. Phase 3 will introduce
+# real harness crates and demote this dependency to `[dev-dependencies]`.
+katachi-test-support = { path = "../katachi-test-support" }
+anyhow = { workspace = true }
+camino = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+which = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+tempfile = { workspace = true }

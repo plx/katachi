@@ -1,0 +1,67 @@
+---
+source: crates/katachi-cli/tests/have_describe.rs
+assertion_line: 115
+expression: stdout
+---
+{
+  "resolved": {
+    "katachi_id": "a11y",
+    "harness": "claude",
+    "backend": "cli",
+    "selected_items": [
+      {
+        "item": {
+          "harness": "claude",
+          "kind": "agent",
+          "id": "reviewer"
+        },
+        "reason": "semantic_closure",
+        "pulled_in_by": {
+          "harness": "claude",
+          "kind": "skill",
+          "id": "axe-runner"
+        }
+      },
+      {
+        "item": {
+          "harness": "claude",
+          "kind": "plugin",
+          "id": "web-a11y"
+        },
+        "reason": "direct"
+      },
+      {
+        "item": {
+          "harness": "claude",
+          "kind": "skill",
+          "id": "axe-reporter"
+        },
+        "reason": "packaging_closure",
+        "pulled_in_by": {
+          "harness": "claude",
+          "kind": "plugin",
+          "id": "web-a11y"
+        }
+      },
+      {
+        "item": {
+          "harness": "claude",
+          "kind": "skill",
+          "id": "axe-runner"
+        },
+        "reason": "packaging_closure",
+        "pulled_in_by": {
+          "harness": "claude",
+          "kind": "plugin",
+          "id": "web-a11y"
+        }
+      }
+    ],
+    "run_profile": {
+      "backend": "cli"
+    },
+    "diagnostics": []
+  },
+  "diagnostics": [],
+  "description": "Accessibility auditing loadout."
+}

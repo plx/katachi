@@ -1,0 +1,18 @@
+[package]
+name = "katachi-harness-codex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Codex harness module for katachi (scan, resolve, plan, execute)."
+
+[lints]
+workspace = true
+
+[dependencies]
+katachi-core = { path = "../katachi-core" }
+
+[dev-dependencies]
+insta = { workspace = true }
+tempfile = { workspace = true }
