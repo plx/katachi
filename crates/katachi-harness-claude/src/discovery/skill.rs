@@ -5,17 +5,12 @@
 //! skill emits a `ClaudeItemKind::Skill` and — when its frontmatter names
 //! an `agent` — a semantic edge labelled `skill_uses_agent` from the
 //! skill to that agent.
-//!
-//! The parser is tolerant: it accepts unknown keys, keeps the raw body
-//! around so downstream tooling can re-display it, and always surfaces a
-//! diagnostic rather than failing the whole scan when a single file is
-//! malformed.
 
 use camino::Utf8Path;
-use katachi_core::harness::{DependencyEdge, DiscoveredItem, EdgeKind, ItemSource, RosterCatalog};
+use katachi_core::harness::{DiscoveredItem, EdgeKind, ItemSource};
 use katachi_core::model::{HarnessKind, ItemRef};
 
-use crate::discovery::push_warning;
+use crate::discovery::{push_warning, PendingEdge, ScanState};
 use crate::error::ClaudeDiscoveryError;
 use crate::frontmatter;
 use crate::item::{ClaudeEdgeLabel, ClaudeItemKind};
@@ -23,18 +18,17 @@ use crate::paths::{ClaudeDir, ClaudeScope, DiscoveredRoots};
 
 /// Entry point invoked from [`super::scan_from_roots`].
 pub fn scan_loose_skills(
-    catalog: &mut RosterCatalog,
+    state: &mut ScanState,
     roots: &DiscoveredRoots,
 ) -> Result<(), ClaudeDiscoveryError> {
     for dir in roots.existing_claude_dirs() {
-        discover_in_dir(catalog, dir)?;
+        discover_in_dir(state, dir)?;
     }
     Ok(())
 }
 
-/// Look for `skills/<name>/SKILL.md` inside a single scoped `.claude/`.
 fn discover_in_dir(
-    catalog: &mut RosterCatalog,
+    state: &mut ScanState,
     dir: &ClaudeDir,
 ) -> Result<(), ClaudeDiscoveryError> {
     let skills_dir = dir.skills_dir();
@@ -59,12 +53,9 @@ fn discover_in_dir(
         };
         entries.push(utf8);
     }
-    entries.sort(); // deterministic order across filesystems
+    entries.sort();
     for entry in entries {
-        let meta = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
+        let Ok(meta) = entry.metadata() else { continue };
         if !meta.is_dir() {
             continue;
         }
@@ -73,29 +64,30 @@ fn discover_in_dir(
             continue;
         }
         match parse_skill_file(&skill_md, dir.scope) {
-            Ok(Some((item, edges))) => {
-                if let Err(err) = catalog.insert_item(item.clone()) {
+            Ok(Some((item, pending))) => {
+                let item_ref = item.item_ref.clone();
+                if let Err(err) = state.catalog.insert_item(item) {
                     push_warning(
-                        catalog,
+                        &mut state.catalog,
                         "claude.duplicate-skill",
                         format!("ignoring duplicate skill at `{}`: {err}", skill_md),
                     );
                 } else {
-                    for pending in edges {
-                        emit_pending_edge(catalog, &item.item_ref, pending);
+                    for p in pending {
+                        state.pending_edges.push(p.into_pending(&item_ref));
                     }
                 }
             }
             Ok(None) => {
                 push_warning(
-                    catalog,
+                    &mut state.catalog,
                     "claude.skill-missing-name",
                     format!("skill at `{skill_md}` has no `name` frontmatter; skipped"),
                 );
             }
             Err(err) => {
                 push_warning(
-                    catalog,
+                    &mut state.catalog,
                     "claude.skill-parse-failed",
                     format!("could not parse skill at `{skill_md}`: {err}"),
                 );
@@ -105,63 +97,34 @@ fn discover_in_dir(
     Ok(())
 }
 
-/// An edge produced by a skill's frontmatter whose target may not yet
-/// exist in the catalog. The scan orchestrator records these directly as
-/// catalog edges only when the target is present; otherwise it defers to
-/// a diagnostic so later stages (validation, resolution) can see them.
-struct PendingEdge {
+/// Intermediate pending-edge record used by the skill parser. Each entry
+/// is promoted to a real `PendingEdge` once the owning skill's `item_ref`
+/// is known.
+struct SkillPending {
     label: ClaudeEdgeLabel,
     target_kind: ClaudeItemKind,
     target_id: String,
-    /// Used for dangling-ref diagnostics.
-    note: String,
+    required: bool,
 }
 
-fn emit_pending_edge(
-    catalog: &mut RosterCatalog,
-    from: &ItemRef,
-    pending: PendingEdge,
-) {
-    let target = ItemRef::new(
-        HarnessKind::Claude,
-        pending.target_kind.as_str(),
-        pending.target_id.clone(),
-    );
-    // If the target item exists already, emit the edge; otherwise stash
-    // a diagnostic so the validator can surface it later.
-    if catalog.contains(&target) {
-        let edge = DependencyEdge {
+impl SkillPending {
+    fn into_pending(self, from: &ItemRef) -> PendingEdge {
+        PendingEdge {
             from: from.clone(),
-            to: target,
-            kind: EdgeKind::Semantic,
-            required: false,
-            note: Some(pending.label.as_str().to_string()),
-        };
-        if let Err(err) = catalog.insert_edge(edge) {
-            push_warning(
-                catalog,
-                "claude.duplicate-edge",
-                format!("ignoring duplicate skill edge: {err}"),
-            );
+            target_kind: self.target_kind,
+            target_id: self.target_id,
+            edge_kind: EdgeKind::Semantic,
+            label: self.label,
+            required: self.required,
+            missing_code: "claude.skill-missing-target".into(),
         }
-    } else {
-        push_warning(
-            catalog,
-            "claude.skill-missing-target",
-            format!(
-                "skill `{from}` references missing {kind} `{id}` ({note})",
-                kind = pending.target_kind.as_str(),
-                id = pending.target_id,
-                note = pending.note
-            ),
-        );
     }
 }
 
 fn parse_skill_file(
     path: &Utf8Path,
     scope: ClaudeScope,
-) -> Result<Option<(DiscoveredItem, Vec<PendingEdge>)>, ClaudeDiscoveryError> {
+) -> Result<Option<(DiscoveredItem, Vec<SkillPending>)>, ClaudeDiscoveryError> {
     let source = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
         ClaudeDiscoveryError::Io {
             path: path.to_owned(),
@@ -174,7 +137,7 @@ fn parse_skill_file(
         Some(s) if !s.is_empty() => s.to_string(),
         _ => {
             // Fall back to the directory name so every skill is at least
-            // addressable, but signal via None so the caller can warn.
+            // addressable.
             let dir_name = path
                 .parent()
                 .and_then(|p| p.file_name())
@@ -241,15 +204,15 @@ fn parse_skill_file(
 
     let mut pending = Vec::new();
     if let Some(agent_id) = agent {
-        pending.push(PendingEdge {
+        pending.push(SkillPending {
             label: ClaudeEdgeLabel::SkillUsesAgent,
             target_kind: ClaudeItemKind::Agent,
             target_id: agent_id,
-            note: "skill_uses_agent".into(),
+            required: false,
         });
     }
     for mcp in mcp_refs {
-        pending.push(PendingEdge {
+        pending.push(SkillPending {
             label: if mcp_required {
                 ClaudeEdgeLabel::ItemRequiresMcp
             } else {
@@ -257,11 +220,7 @@ fn parse_skill_file(
             },
             target_kind: ClaudeItemKind::McpServer,
             target_id: mcp,
-            note: if mcp_required {
-                "item_requires_mcp".into()
-            } else {
-                "item_suggests_mcp".into()
-            },
+            required: mcp_required,
         });
     }
     Ok(Some((item, pending)))
@@ -272,6 +231,7 @@ mod tests {
     use super::*;
     use crate::paths::{ClaudeDir, DiscoveredRoots};
     use camino::Utf8PathBuf;
+    use katachi_core::harness::RosterCatalog;
     use std::fs;
     use tempfile::TempDir;
 
@@ -289,6 +249,12 @@ mod tests {
         (root, roots)
     }
 
+    fn scan_alone(roots: &DiscoveredRoots) -> RosterCatalog {
+        let mut state = ScanState::new();
+        scan_loose_skills(&mut state, roots).unwrap();
+        state.finalize()
+    }
+
     #[test]
     fn parses_minimal_skill() {
         let td = TempDir::new().unwrap();
@@ -300,8 +266,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut catalog = RosterCatalog::empty(HarnessKind::Claude);
-        scan_loose_skills(&mut catalog, &roots).unwrap();
+        let catalog = scan_alone(&roots);
         assert_eq!(catalog.items.len(), 1);
         let (ir, item) = catalog.iter_items().next().unwrap();
         assert_eq!(ir.kind, "skill");
@@ -320,8 +285,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut catalog = RosterCatalog::empty(HarnessKind::Claude);
-        scan_loose_skills(&mut catalog, &roots).unwrap();
+        let catalog = scan_alone(&roots);
         assert_eq!(catalog.items.len(), 1);
         assert_eq!(catalog.items.keys().next().unwrap().id, "plain");
     }
@@ -337,8 +301,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut catalog = RosterCatalog::empty(HarnessKind::Claude);
-        scan_loose_skills(&mut catalog, &roots).unwrap();
+        let catalog = scan_alone(&roots);
         assert_eq!(catalog.items.len(), 1);
         assert!(catalog
             .diagnostics
@@ -357,9 +320,10 @@ mod tests {
         )
         .unwrap();
 
-        let mut catalog = RosterCatalog::empty(HarnessKind::Claude);
+        let mut state = ScanState::new();
         // Pre-populate the reviewer agent so the skill can wire up to it.
-        catalog
+        state
+            .catalog
             .insert_item(DiscoveredItem {
                 item_ref: ItemRef::new(HarnessKind::Claude, "agent", "reviewer"),
                 display_name: "reviewer".into(),
@@ -370,7 +334,8 @@ mod tests {
                 constraints: Vec::new(),
             })
             .unwrap();
-        scan_loose_skills(&mut catalog, &roots).unwrap();
+        scan_loose_skills(&mut state, &roots).unwrap();
+        let catalog = state.finalize();
         assert_eq!(catalog.edges.len(), 1);
         let e = &catalog.edges[0];
         assert_eq!(e.from.id, "axe");
@@ -389,8 +354,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut catalog = RosterCatalog::empty(HarnessKind::Claude);
-        scan_loose_skills(&mut catalog, &roots).unwrap();
+        let catalog = scan_alone(&roots);
         assert!(catalog.items.is_empty());
         assert!(catalog
             .diagnostics
@@ -409,8 +373,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut catalog = RosterCatalog::empty(HarnessKind::Claude);
-        scan_loose_skills(&mut catalog, &roots).unwrap();
+        let catalog = scan_alone(&roots);
         let (_, item) = catalog.iter_items().next().unwrap();
         assert!(item.raw["mcp_required"].as_bool().unwrap_or(false));
     }
