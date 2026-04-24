@@ -8,7 +8,7 @@ mod logging;
 
 use clap::Parser;
 
-use cli::{Cli, Command, GlobalArgs, HaveAction, HaveCmd};
+use cli::{Cli, Command, GlobalArgs, HarnessCmd, HarnessName, HaveAction, HaveCmd};
 use exit::ExitCode;
 
 fn main() -> std::process::ExitCode {
@@ -28,7 +28,21 @@ fn dispatch(cli: Cli) -> ExitCode {
             }
         },
         Command::Have(have) => dispatch_have(&global, have),
+        Command::Harness(harness) => dispatch_harness(&global, harness),
         other => not_yet_implemented(&global, &other),
+    }
+}
+
+fn dispatch_harness(global: &GlobalArgs, harness: HarnessCmd) -> ExitCode {
+    match harness.name {
+        HarnessName::Codex => match commands::harness_codex::dispatch(global, &harness) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!("katachi harness codex: {err:#}");
+                ExitCode::Config
+            }
+        },
+        _ => not_yet_implemented(global, &Command::Harness(harness)),
     }
 }
 

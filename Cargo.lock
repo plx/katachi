@@ -472,9 +472,16 @@ dependencies = [
 name = "katachi-harness-codex"
 version = "0.1.0"
 dependencies = [
+ "camino",
+ "indexmap",
  "insta",
  "katachi-core",
+ "serde",
+ "serde_json",
  "tempfile",
+ "thiserror",
+ "toml",
+ "tracing",
 ]
 
 [[package]]
