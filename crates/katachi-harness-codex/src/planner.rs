@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use katachi_core::error::PlanError;
 use katachi_core::harness::PlanContext;
 use katachi_core::model::{BackendKind, HarnessKind, MaterializationMode};
@@ -501,8 +501,3 @@ mod tests {
     }
 }
 
-// Allow the Utf8Path import where it's only used for trait bounds later.
-#[allow(dead_code)]
-fn _pathbuf_from(p: &Utf8Path) -> Utf8PathBuf {
-    p.to_path_buf()
-}
