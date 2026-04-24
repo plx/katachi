@@ -67,6 +67,33 @@ impl DiscoveredRoots {
             && self.top_level_claude_mds.is_empty()
             && self.plugin_roots.is_empty()
     }
+
+    /// Return only the `.claude/` roots that currently exist on disk. Used
+    /// by sub-scanners that would otherwise emit noise warnings for paths
+    /// the user simply hasn't populated.
+    pub fn existing_claude_dirs(&self) -> Vec<&ClaudeDir> {
+        self.claude_dirs
+            .iter()
+            .filter(|d| d.path.exists())
+            .collect()
+    }
+
+    /// Return only the plugin roots that currently exist on disk.
+    pub fn existing_plugin_roots(&self) -> Vec<&ScopedPath> {
+        self.plugin_roots
+            .iter()
+            .filter(|p| p.path.exists())
+            .collect()
+    }
+
+    /// Return only the top-level `CLAUDE.md` entries that currently exist
+    /// on disk.
+    pub fn existing_claude_mds(&self) -> Vec<&ScopedPath> {
+        self.top_level_claude_mds
+            .iter()
+            .filter(|p| p.path.exists())
+            .collect()
+    }
 }
 
 /// A `.claude/` directory and its associated scope.
@@ -242,5 +269,78 @@ mod tests {
             .claude_dirs
             .iter()
             .any(|d| d.path == abs_project.join(".claude")));
+    }
+
+    /// Fixture repo: user+project `.claude/` with skills, agents, rules,
+    /// plus a plugin root and top-level `CLAUDE.md`. Verifies that every
+    /// scope-scoped path is discoverable and that the existence filters
+    /// suppress paths that were configured but never populated.
+    #[test]
+    fn full_repo_fixture_surfaces_every_root() {
+        let td = TempDir::new().unwrap();
+        let cwd = Utf8PathBuf::from_path_buf(td.path().to_path_buf()).unwrap();
+
+        // Layout.
+        fs::create_dir_all(cwd.join(".claude/skills/greeter")).unwrap();
+        fs::write(
+            cwd.join(".claude/skills/greeter/SKILL.md"),
+            "---\nname: greeter\n---\nhi\n",
+        )
+        .unwrap();
+        fs::create_dir_all(cwd.join(".claude/agents")).unwrap();
+        fs::write(cwd.join(".claude/agents/reviewer.md"), "---\nname: reviewer\n---\n").unwrap();
+        fs::create_dir_all(cwd.join(".claude/rules")).unwrap();
+        fs::write(cwd.join(".claude/rules/style.md"), "be nice").unwrap();
+        fs::write(cwd.join("CLAUDE.md"), "top level instructions").unwrap();
+
+        let user_home = cwd.join("home/user");
+        fs::create_dir_all(user_home.join(".claude/skills")).unwrap();
+        fs::create_dir_all(user_home.join(".claude/plugins/web-a11y")).unwrap();
+        fs::write(user_home.join(".claude/CLAUDE.md"), "user").unwrap();
+
+        let mut config = ClaudeConfig::default();
+        config.user_root = user_home.join(".claude");
+        config.plugin_roots = vec![user_home.join(".claude/plugins")];
+        config.project_roots = vec![Utf8PathBuf::from(".")];
+
+        let roots = discover_roots(&cwd, &config);
+
+        // Expect both the user and the project `.claude/` entry.
+        let scopes: Vec<_> = roots.claude_dirs.iter().map(|d| d.scope).collect();
+        assert!(scopes.contains(&ClaudeScope::User));
+        assert!(scopes.contains(&ClaudeScope::Project));
+
+        let existing = roots.existing_claude_dirs();
+        assert_eq!(
+            existing.len(),
+            2,
+            "both user and project .claude should exist"
+        );
+
+        let claude_mds = roots.existing_claude_mds();
+        assert!(claude_mds
+            .iter()
+            .any(|p| p.scope == ClaudeScope::Project && p.path == cwd.join("CLAUDE.md")));
+
+        let existing_plugins = roots.existing_plugin_roots();
+        assert_eq!(existing_plugins.len(), 1);
+        assert_eq!(existing_plugins[0].scope, ClaudeScope::PluginUser);
+    }
+
+    #[test]
+    fn nonexistent_paths_filtered_out() {
+        let td = TempDir::new().unwrap();
+        let cwd = Utf8PathBuf::from_path_buf(td.path().to_path_buf()).unwrap();
+
+        let mut config = ClaudeConfig::default();
+        // None of these paths exist on disk.
+        config.user_root = cwd.join("ghost-user/.claude");
+        config.plugin_roots = vec![cwd.join("ghost-user/.claude/plugins")];
+        config.project_roots = vec![Utf8PathBuf::from(".")];
+
+        let roots = discover_roots(&cwd, &config);
+        assert!(!roots.claude_dirs.is_empty());
+        assert!(roots.existing_claude_dirs().is_empty());
+        assert!(roots.existing_plugin_roots().is_empty());
     }
 }

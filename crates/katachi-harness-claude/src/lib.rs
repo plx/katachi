@@ -16,6 +16,7 @@ pub mod config;
 pub mod discovery;
 pub mod error;
 pub mod explain;
+pub mod frontmatter;
 pub mod item;
 pub mod module;
 pub mod paths;
