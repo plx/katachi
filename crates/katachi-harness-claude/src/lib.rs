@@ -21,6 +21,7 @@ pub mod item;
 pub mod module;
 pub mod paths;
 pub mod plan;
+pub mod resolve;
 pub mod roster;
 pub mod transcript;
 

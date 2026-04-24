@@ -4,13 +4,12 @@
 //! plus a run profile. Rosters are harness-scoped: the shared katachi
 //! definition points at a roster by id, and the Claude harness resolves
 //! that roster into concrete CLI flags and overlay contents.
-//!
-//! The concrete parser lands in Step 8. This module currently exposes the
-//! file-format skeleton so other modules can take typed references.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use katachi_core::paths::StoragePaths;
 use serde::{Deserialize, Serialize};
 
+use crate::config::ClaudeConfig;
 use crate::error::ClaudeRosterError;
 
 pub const CLAUDE_ROSTER_SCHEMA_VERSION: u32 = 1;
@@ -143,6 +142,54 @@ impl ClaudeRoster {
             }
         }
     }
+
+    /// Flatten the selection map into a `(kind, id)` list so callers can
+    /// iterate without having to care about which sub-list an entry came
+    /// from. Order matches the ordering in the roster TOML — plugins
+    /// first, then skills, etc. — to keep downstream diagnostics stable.
+    pub fn selection_entries(&self) -> Vec<(&'static str, &str)> {
+        let mut out = Vec::new();
+        for p in &self.selection.plugins {
+            out.push(("plugin", p.as_str()));
+        }
+        for s in &self.selection.skills {
+            out.push(("skill", s.as_str()));
+        }
+        for a in &self.selection.agents {
+            out.push(("agent", a.as_str()));
+        }
+        for h in &self.selection.hooks {
+            out.push(("hook_set", h.as_str()));
+        }
+        for m in &self.selection.mcp_servers {
+            out.push(("mcp_server", m.as_str()));
+        }
+        for i in &self.selection.instructions {
+            out.push(("instruction_source", i.as_str()));
+        }
+        for s in &self.selection.output_styles {
+            out.push(("output_style", s.as_str()));
+        }
+        out
+    }
+
+    /// Desired backend for this roster, if one is specified.
+    pub fn backend(&self) -> Option<katachi_core::model::BackendKind> {
+        self.run_profile
+            .backend
+            .as_deref()
+            .and_then(|b| b.parse().ok())
+    }
+}
+
+/// Conventional roster directory: `<data_root>/rosters/claude/` unless
+/// the Claude config overrides it.
+pub fn roster_dir(storage: &StoragePaths, config: &ClaudeConfig) -> Utf8PathBuf {
+    if let Some(custom) = &config.roster_dir_override {
+        custom.clone()
+    } else {
+        storage.rosters_dir().join("claude")
+    }
 }
 
 /// Flat-file store that loads every `*.toml` under a directory into
@@ -150,6 +197,7 @@ impl ClaudeRoster {
 #[derive(Clone, Debug, Default)]
 pub struct ClaudeRosterStore {
     rosters: Vec<ClaudeRoster>,
+    source_dir: Option<Utf8PathBuf>,
 }
 
 impl ClaudeRosterStore {
@@ -160,6 +208,7 @@ impl ClaudeRosterStore {
     pub fn from_rosters<I: IntoIterator<Item = ClaudeRoster>>(iter: I) -> Self {
         Self {
             rosters: iter.into_iter().collect(),
+            source_dir: None,
         }
     }
 
@@ -168,6 +217,7 @@ impl ClaudeRosterStore {
     /// diagnostic or a fatal error.
     pub fn load_from_dir(dir: &Utf8Path) -> Result<Self, ClaudeRosterError> {
         let mut store = Self::new();
+        store.source_dir = Some(dir.to_owned());
         if !dir.exists() {
             return Ok(store);
         }
@@ -197,6 +247,31 @@ impl ClaudeRosterStore {
         }
         store.rosters.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(store)
+    }
+
+    /// Convenience: load the store from the conventional
+    /// `<data_root>/rosters/claude/` directory.
+    pub fn load_default(
+        storage: &StoragePaths,
+        config: &ClaudeConfig,
+    ) -> Result<Self, ClaudeRosterError> {
+        Self::load_from_dir(&roster_dir(storage, config))
+    }
+
+    /// Fetch a roster by id or fail with `NotFound`.
+    pub fn require(&self, id: &str) -> Result<&ClaudeRoster, ClaudeRosterError> {
+        self.find(id).ok_or_else(|| ClaudeRosterError::NotFound {
+            id: id.to_string(),
+            dir: self
+                .source_dir
+                .clone()
+                .unwrap_or_else(|| Utf8PathBuf::from("<in-memory>")),
+        })
+    }
+
+    /// The directory the store was loaded from, if any.
+    pub fn source_dir(&self) -> Option<&Utf8Path> {
+        self.source_dir.as_deref()
     }
 
     pub fn find(&self, id: &str) -> Option<&ClaudeRoster> {
@@ -325,5 +400,36 @@ id = "min"
         assert!(r.selection.plugins.is_empty());
         assert!(r.run_profile.setting_sources.is_empty());
         assert_eq!(r.resolution.materialization, MaterializationMode::TempOverlay);
+    }
+
+    #[test]
+    fn require_errors_when_missing() {
+        let store = ClaudeRosterStore::from_rosters(std::iter::empty());
+        let err = store.require("ghost").unwrap_err();
+        assert!(matches!(err, ClaudeRosterError::NotFound { .. }));
+    }
+
+    #[test]
+    fn selection_entries_flattens_in_stable_order() {
+        let path = Utf8PathBuf::from("t.toml");
+        let r = ClaudeRoster::from_toml_str(&path, REALISTIC).unwrap();
+        let entries = r.selection_entries();
+        let kinds: Vec<_> = entries.iter().map(|(k, _)| *k).collect();
+        // Plugins come before skills which come before agents, etc.
+        assert!(
+            kinds.iter().position(|k| *k == "plugin")
+                < kinds.iter().position(|k| *k == "skill")
+        );
+        assert!(
+            kinds.iter().position(|k| *k == "skill")
+                < kinds.iter().position(|k| *k == "agent")
+        );
+    }
+
+    #[test]
+    fn backend_parses_to_kind() {
+        let path = Utf8PathBuf::from("t.toml");
+        let r = ClaudeRoster::from_toml_str(&path, REALISTIC).unwrap();
+        assert_eq!(r.backend(), Some(katachi_core::model::BackendKind::Cli));
     }
 }
