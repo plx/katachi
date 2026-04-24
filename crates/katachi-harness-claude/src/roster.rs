@@ -1,0 +1,329 @@
+//! Claude roster file format.
+//!
+//! Claude rosters are TOML files that name a plugin/skill/agent bundle
+//! plus a run profile. Rosters are harness-scoped: the shared katachi
+//! definition points at a roster by id, and the Claude harness resolves
+//! that roster into concrete CLI flags and overlay contents.
+//!
+//! The concrete parser lands in Step 8. This module currently exposes the
+//! file-format skeleton so other modules can take typed references.
+
+use camino::{Utf8Path, Utf8PathBuf};
+use serde::{Deserialize, Serialize};
+
+use crate::error::ClaudeRosterError;
+
+pub const CLAUDE_ROSTER_SCHEMA_VERSION: u32 = 1;
+
+/// Top-level Claude roster file.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClaudeRoster {
+    #[serde(default = "default_schema")]
+    pub version: u32,
+    pub id: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub selection: RosterSelection,
+    #[serde(default)]
+    pub run_profile: RunProfile,
+    #[serde(default)]
+    pub resolution: RosterResolution,
+}
+
+fn default_schema() -> u32 {
+    CLAUDE_ROSTER_SCHEMA_VERSION
+}
+
+/// Which harness-native items this roster picks up. All fields are
+/// optional — a roster can restrict itself to, say, plugins only.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RosterSelection {
+    pub plugins: Vec<String>,
+    pub skills: Vec<String>,
+    pub agents: Vec<String>,
+    pub hooks: Vec<String>,
+    pub mcp_servers: Vec<String>,
+    pub instructions: Vec<String>,
+    pub output_styles: Vec<String>,
+}
+
+/// Per-invocation settings. Values mirror the Claude CLI flags and SDK
+/// options; unknown keys are preserved via `extras` for forward-compat.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RunProfile {
+    pub backend: Option<String>,
+    pub model: Option<String>,
+    pub permission_mode: Option<String>,
+    pub setting_sources: Vec<String>,
+    pub output_format: Option<String>,
+    pub include_partial_messages: Option<bool>,
+    pub append_system_prompt: Option<String>,
+    pub system_prompt: Option<String>,
+    pub allowed_tools: Vec<String>,
+    pub disallowed_tools: Vec<String>,
+    pub max_turns: Option<u32>,
+    pub timeout_secs: Option<u64>,
+    #[serde(flatten)]
+    pub extras: indexmap::IndexMap<String, toml::Value>,
+}
+
+/// Controls katachi's behavior, not Claude's.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RosterResolution {
+    pub include_transitive: bool,
+    pub materialization: MaterializationMode,
+    pub strict_mcp_config: bool,
+    pub bare: bool,
+}
+
+impl Default for RosterResolution {
+    fn default() -> Self {
+        Self {
+            include_transitive: true,
+            materialization: MaterializationMode::TempOverlay,
+            strict_mcp_config: true,
+            bare: false,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MaterializationMode {
+    Ambient,
+    TempOverlay,
+}
+
+impl ClaudeRoster {
+    /// Parse a Claude roster from a TOML string.
+    pub fn from_toml_str(path: &Utf8Path, s: &str) -> Result<Self, ClaudeRosterError> {
+        let parsed: ClaudeRoster = toml::from_str(s).map_err(|source| ClaudeRosterError::Parse {
+            path: path.to_owned(),
+            source,
+        })?;
+        parsed.validate(path)?;
+        Ok(parsed)
+    }
+
+    /// Load a Claude roster from disk.
+    pub fn from_file(path: &Utf8Path) -> Result<Self, ClaudeRosterError> {
+        let raw = std::fs::read_to_string(path).map_err(|source| ClaudeRosterError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        Self::from_toml_str(path, &raw)
+    }
+
+    fn validate(&self, path: &Utf8Path) -> Result<(), ClaudeRosterError> {
+        if self.version != CLAUDE_ROSTER_SCHEMA_VERSION {
+            return Err(ClaudeRosterError::UnsupportedVersion {
+                path: path.to_owned(),
+                found: self.version,
+                expected: CLAUDE_ROSTER_SCHEMA_VERSION,
+            });
+        }
+        if self.id.trim().is_empty() {
+            return Err(ClaudeRosterError::EmptyId {
+                path: path.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Materialization mode as its shared-core equivalent.
+    pub fn materialization_mode(&self) -> katachi_core::model::MaterializationMode {
+        match self.resolution.materialization {
+            MaterializationMode::Ambient => katachi_core::model::MaterializationMode::Ambient,
+            MaterializationMode::TempOverlay => {
+                katachi_core::model::MaterializationMode::TempOverlay
+            }
+        }
+    }
+}
+
+/// Flat-file store that loads every `*.toml` under a directory into
+/// [`ClaudeRoster`] values.
+#[derive(Clone, Debug, Default)]
+pub struct ClaudeRosterStore {
+    rosters: Vec<ClaudeRoster>,
+}
+
+impl ClaudeRosterStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_rosters<I: IntoIterator<Item = ClaudeRoster>>(iter: I) -> Self {
+        Self {
+            rosters: iter.into_iter().collect(),
+        }
+    }
+
+    /// Load every `*.toml` under `dir`, sorted by id. Missing directories
+    /// yield an empty store so the caller can decide whether this is a
+    /// diagnostic or a fatal error.
+    pub fn load_from_dir(dir: &Utf8Path) -> Result<Self, ClaudeRosterError> {
+        let mut store = Self::new();
+        if !dir.exists() {
+            return Ok(store);
+        }
+        let read = std::fs::read_dir(dir.as_std_path()).map_err(|source| {
+            ClaudeRosterError::ReadDir {
+                path: dir.to_owned(),
+                source,
+            }
+        })?;
+        for entry in read {
+            let entry = entry.map_err(|source| ClaudeRosterError::ReadDir {
+                path: dir.to_owned(),
+                source,
+            })?;
+            let p = entry.path();
+            if !p.is_file() {
+                continue;
+            }
+            let Some(utf8) = Utf8PathBuf::from_path_buf(p).ok() else {
+                continue;
+            };
+            if utf8.extension() != Some("toml") {
+                continue;
+            }
+            let r = ClaudeRoster::from_file(&utf8)?;
+            store.rosters.push(r);
+        }
+        store.rosters.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(store)
+    }
+
+    pub fn find(&self, id: &str) -> Option<&ClaudeRoster> {
+        self.rosters.iter().find(|r| r.id == id)
+    }
+
+    pub fn all(&self) -> &[ClaudeRoster] {
+        &self.rosters
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rosters.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.rosters.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    const REALISTIC: &str = r#"
+version = 1
+id = "accessibility-auditor"
+description = "Claude accessibility audit loadout"
+
+[selection]
+plugins = ["web-a11y"]
+skills = ["axe-runner"]
+agents = ["a11y-reviewer"]
+hooks = ["a11y-report-hooks"]
+mcp_servers = ["chrome-devtools"]
+instructions = ["project:CLAUDE.md", "rule:a11y-review"]
+output_styles = []
+
+[run_profile]
+backend = "cli"
+model = "sonnet"
+permission_mode = "plan"
+setting_sources = ["project", "user"]
+output_format = "stream-json"
+include_partial_messages = true
+append_system_prompt = "Focus on WCAG 2.2 AA issues and produce a concise findings list."
+
+[resolution]
+include_transitive = true
+materialization = "temp-overlay"
+strict_mcp_config = true
+bare = false
+"#;
+
+    #[test]
+    fn realistic_roster_parses() {
+        let path = Utf8PathBuf::from("realistic.toml");
+        let r = ClaudeRoster::from_toml_str(&path, REALISTIC).unwrap();
+        assert_eq!(r.id, "accessibility-auditor");
+        assert_eq!(r.selection.plugins, vec!["web-a11y".to_string()]);
+        assert_eq!(r.run_profile.model.as_deref(), Some("sonnet"));
+        assert_eq!(r.run_profile.setting_sources.len(), 2);
+        assert_eq!(r.resolution.materialization, MaterializationMode::TempOverlay);
+    }
+
+    #[test]
+    fn empty_id_rejected() {
+        let path = Utf8PathBuf::from("bad.toml");
+        let bad = r#"
+version = 1
+id = ""
+"#;
+        let err = ClaudeRoster::from_toml_str(&path, bad).unwrap_err();
+        assert!(matches!(err, ClaudeRosterError::EmptyId { .. }));
+    }
+
+    #[test]
+    fn unknown_version_rejected() {
+        let path = Utf8PathBuf::from("bad.toml");
+        let bad = r#"
+version = 99
+id = "x"
+"#;
+        let err = ClaudeRoster::from_toml_str(&path, bad).unwrap_err();
+        assert!(matches!(err, ClaudeRosterError::UnsupportedVersion { .. }));
+    }
+
+    #[test]
+    fn store_loads_directory_sorted() {
+        let td = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(td.path().to_path_buf()).unwrap();
+        std::fs::write(
+            root.join("zeta.toml"),
+            r#"
+version = 1
+id = "zeta"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("alpha.toml"),
+            r#"
+version = 1
+id = "alpha"
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("notes.md"), "ignored").unwrap();
+
+        let store = ClaudeRosterStore::load_from_dir(&root).unwrap();
+        assert_eq!(store.len(), 2);
+        assert_eq!(store.all()[0].id, "alpha");
+        assert_eq!(store.all()[1].id, "zeta");
+        assert!(store.find("alpha").is_some());
+        assert!(store.find("ghost").is_none());
+    }
+
+    #[test]
+    fn defaults_applied_when_sections_omitted() {
+        let path = Utf8PathBuf::from("minimal.toml");
+        let minimal = r#"
+version = 1
+id = "min"
+"#;
+        let r = ClaudeRoster::from_toml_str(&path, minimal).unwrap();
+        assert!(r.selection.plugins.is_empty());
+        assert!(r.run_profile.setting_sources.is_empty());
+        assert_eq!(r.resolution.materialization, MaterializationMode::TempOverlay);
+    }
+}
