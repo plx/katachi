@@ -13,14 +13,17 @@
 pub mod agents;
 pub mod config_layers;
 pub mod discovery;
+pub mod effective;
 pub mod executor;
 pub mod harness;
 pub mod hooks;
 pub mod items;
+pub mod legality;
 pub mod mcp;
 pub mod planner;
 pub mod plugins;
 pub mod roster;
+pub mod roster_file;
 pub mod rules;
 pub mod runtime;
 pub mod skills;
