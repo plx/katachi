@@ -424,6 +424,9 @@ dependencies = [
  "clap",
  "insta",
  "katachi-core",
+ "katachi-harness-claude",
+ "katachi-harness-codex",
+ "katachi-harness-gemini",
  "katachi-test-support",
  "serde",
  "serde_json",
@@ -454,6 +457,33 @@ dependencies = [
  "tracing",
  "uuid",
  "which",
+]
+
+[[package]]
+name = "katachi-harness-claude"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "katachi-core",
+ "tempfile",
+]
+
+[[package]]
+name = "katachi-harness-codex"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "katachi-core",
+ "tempfile",
+]
+
+[[package]]
+name = "katachi-harness-gemini"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "katachi-core",
+ "tempfile",
 ]
 
 [[package]]

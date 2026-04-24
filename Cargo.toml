@@ -3,6 +3,9 @@ resolver = "2"
 members = [
     "crates/katachi-cli",
     "crates/katachi-core",
+    "crates/katachi-harness-claude",
+    "crates/katachi-harness-codex",
+    "crates/katachi-harness-gemini",
     "crates/katachi-test-support",
 ]
 
