@@ -53,6 +53,14 @@ impl HarnessModule for ClaudeHarness {
     }
 
     fn execute(&self, ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> {
-        katachi_core::execute::run(ctx)
+        // Hand the shared executor our Claude-specific stdout normalizer
+        // so stream-json output comes out of the run with typed events.
+        let normalizer: Box<dyn Fn(&str) -> katachi_core::transcript::EventKind + Send + Sync> =
+            Box::new(|line| crate::transcript::parse_line(line));
+        katachi_core::execute::run_with_normalizer(ctx, Some(normalizer.as_ref()))
+    }
+
+    fn normalize_stdout_line(&self, line: &str) -> katachi_core::transcript::EventKind {
+        crate::transcript::parse_line(line)
     }
 }

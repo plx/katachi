@@ -46,6 +46,24 @@ pub trait HarnessModule: Send + Sync {
     /// writing `request.json` / `plan.json` before calling, and for
     /// writing `manifest.json` + committing the directory afterwards.
     fn execute(&self, ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError>;
+
+    /// Normalize a single stdout line into a transcript event. The shared
+    /// executor calls this when `transcript_mode` is `JsonStream`.
+    ///
+    /// The default keeps valid JSON as a raw `JsonEvent` payload and
+    /// passes everything else through as `StdoutText`. Harnesses can
+    /// override to recognize their own event shapes (assistant/user/
+    /// tool_use/tool_result/result) and map them onto typed variants.
+    fn normalize_stdout_line(&self, line: &str) -> crate::transcript::EventKind {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return crate::transcript::EventKind::StdoutText { text: line.into() };
+        }
+        match serde_json::from_str::<serde_json::Value>(trimmed) {
+            Ok(payload) => crate::transcript::EventKind::JsonEvent { payload },
+            Err(_) => crate::transcript::EventKind::StdoutText { text: line.into() },
+        }
+    }
 }
 
 /// Context for [`HarnessModule::scan`].
