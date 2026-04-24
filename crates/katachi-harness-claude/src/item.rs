@@ -38,7 +38,7 @@ impl ClaudeItemKind {
     }
 
     /// Parse the canonical string form. Returns `None` for unknown values.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_str(s: &str) -> Option<Self> {
         Some(match s {
             "plugin" => Self::Plugin,
             "skill" => Self::Skill,
@@ -112,9 +112,9 @@ mod tests {
             ClaudeItemKind::OutputStyle,
             ClaudeItemKind::RunProfile,
         ] {
-            assert_eq!(ClaudeItemKind::from_str(kind.as_str()), Some(kind));
+            assert_eq!(ClaudeItemKind::parse_str(kind.as_str()), Some(kind));
         }
-        assert!(ClaudeItemKind::from_str("bogus").is_none());
+        assert!(ClaudeItemKind::parse_str("bogus").is_none());
     }
 
     #[test]

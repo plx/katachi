@@ -63,6 +63,12 @@ pub struct ScanState {
     pub pending_edges: Vec<PendingEdge>,
 }
 
+impl Default for ScanState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScanState {
     pub fn new() -> Self {
         Self {
