@@ -28,9 +28,11 @@ use katachi_harness_claude::ClaudeHarness;
 
 use crate::cli::{
     GlobalArgs, GraphFormat, HarnessAction, HarnessCmd, HarnessName, HarnessPlanAction,
-    MaterializationArg,
+    MaterializationArg, SdkTarget,
 };
 use crate::exit::ExitCode;
+
+use katachi_harness_claude::sdk;
 
 pub fn run(global: &GlobalArgs, cmd: &HarnessCmd) -> Result<ExitCode> {
     match cmd.name {
@@ -87,7 +89,139 @@ fn run_claude(global: &GlobalArgs, action: &HarnessAction) -> Result<ExitCode> {
         HarnessAction::Execute { roster_id, prompt } => {
             run_execute(global, &ctx, roster_id, prompt)
         }
+        HarnessAction::Doctor => run_doctor(global, &ctx),
+        HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, &ctx, roster_id),
+        HarnessAction::Project { roster_id, sdk } => run_project(global, &ctx, roster_id, *sdk),
     }
+}
+
+fn run_doctor(global: &GlobalArgs, ctx: &ClaudeCtx) -> Result<ExitCode> {
+    let binary = &ctx.claude_config.binary;
+    let (found, resolved) = which::which(binary)
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_owned))
+        .map(|p| (true, Some(p)))
+        .unwrap_or((false, None));
+
+    let rosters_dir = katachi_harness_claude::roster::roster_dir(&ctx.storage, &ctx.claude_config);
+    let plugin_roots: Vec<String> = ctx
+        .claude_config
+        .plugin_roots
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
+
+    if global.json {
+        let payload = serde_json::json!({
+            "binary": binary,
+            "found": found,
+            "resolved": resolved,
+            "rosters_dir": rosters_dir,
+            "plugin_roots": plugin_roots,
+            "user_root": ctx.claude_config.user_root,
+            "project_roots": ctx.claude_config.project_roots,
+        });
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("claude doctor");
+        println!("  binary     : {binary}");
+        if found {
+            println!(
+                "  resolved   : {}",
+                resolved.as_deref().unwrap_or("?")
+            );
+        } else {
+            println!("  resolved   : not found on PATH");
+        }
+        println!("  rosters    : {rosters_dir}");
+        println!("  user_root  : {}", ctx.claude_config.user_root);
+        println!("  plugin_roots :");
+        for p in &plugin_roots {
+            println!("    - {p}");
+        }
+        println!("  project_roots:");
+        for p in &ctx.claude_config.project_roots {
+            println!("    - {p}");
+        }
+    }
+    if !found {
+        Ok(ExitCode::Config)
+    } else {
+        Ok(ExitCode::Ok)
+    }
+}
+
+fn run_dump_roster(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> Result<ExitCode> {
+    let (resolved, _req) = match resolve_for_roster(global, ctx, roster_id) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("katachi harness claude dump-roster: {err:#}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let validator_diags = validate(&resolved);
+    let payload = serde_json::json!({
+        "roster": &resolved.roster,
+        "resolved": &resolved.resolved,
+        "projection_diagnostics": &resolved.projection_diagnostics,
+        "validator_diagnostics": &validator_diags,
+        "catalog": &resolved.catalog,
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".into())
+        );
+    }
+    let has_errors = validator_diags.iter().any(|d| d.severity == Severity::Error)
+        || resolved.resolved.diagnostics.iter().any(|d| d.severity == Severity::Error);
+    Ok(if has_errors { ExitCode::Validate } else { ExitCode::Ok })
+}
+
+fn run_project(
+    global: &GlobalArgs,
+    ctx: &ClaudeCtx,
+    roster_id: &str,
+    sdk_target: SdkTarget,
+) -> Result<ExitCode> {
+    let (resolved, _req) = match resolve_for_roster(global, ctx, roster_id) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("katachi harness claude project: {err:#}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let backend = match sdk_target {
+        SdkTarget::Ts => BackendKind::SdkTs,
+        SdkTarget::Py => BackendKind::SdkPy,
+    };
+    let projection = sdk::project(&resolved, backend);
+    if global.json {
+        let payload = serde_json::json!({
+            "backend": projection.backend,
+            "code": projection.code,
+            "diagnostics": projection.diagnostics,
+        });
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        print!("{}", projection.code);
+        if !projection.diagnostics.is_empty() {
+            eprintln!("--- projection diagnostics ---");
+            for d in &projection.diagnostics {
+                eprintln!("[{}] {}: {}", severity_tag(d.severity), d.code, d.message);
+            }
+        }
+    }
+    let has_errors = projection
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error);
+    Ok(if has_errors { ExitCode::Plan } else { ExitCode::Ok })
 }
 
 fn run_scan(global: &GlobalArgs, ctx: &ClaudeCtx) -> Result<ExitCode> {

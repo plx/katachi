@@ -23,6 +23,7 @@ pub mod paths;
 pub mod plan;
 pub mod resolve;
 pub mod roster;
+pub mod sdk;
 pub mod transcript;
 
 pub use module::ClaudeHarness;

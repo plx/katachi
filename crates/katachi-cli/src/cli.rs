@@ -216,6 +216,28 @@ pub enum HarnessAction {
         roster_id: String,
         prompt: String,
     },
+    /// Harness environment + binary diagnostic.
+    Doctor,
+    /// Dump a parsed roster plus its resolved selection for inspection.
+    DumpRoster {
+        #[arg(value_name = "ROSTER_ID")]
+        roster_id: String,
+    },
+    /// Project a roster onto an SDK backend and print the generated code.
+    Project {
+        #[arg(value_name = "ROSTER_ID")]
+        roster_id: String,
+        /// Which SDK to project onto.
+        #[arg(long, value_enum, default_value_t = SdkTarget::Ts)]
+        sdk: SdkTarget,
+    },
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum SdkTarget {
+    Ts,
+    Py,
 }
 
 #[derive(Subcommand, Debug)]
