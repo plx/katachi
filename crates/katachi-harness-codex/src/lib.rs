@@ -11,6 +11,7 @@
 //! `HarnessModule` and delegates to the submodules below.
 
 pub mod agents;
+pub mod cli_flags;
 pub mod config_layers;
 pub mod discovery;
 pub mod effective;
@@ -19,6 +20,7 @@ pub mod harness;
 pub mod hooks;
 pub mod items;
 pub mod legality;
+pub mod materialize;
 pub mod mcp;
 pub mod planner;
 pub mod plugins;
