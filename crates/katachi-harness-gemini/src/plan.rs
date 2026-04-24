@@ -56,7 +56,7 @@ impl ExtensionsMode {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "selected-only" => Some(Self::SelectedOnly),
             "disable-all" | "none" => Some(Self::DisableAll),
@@ -87,7 +87,7 @@ impl GeminiRunProfile {
                 .collect();
         }
         if let Some(mode) = extras.get("extensions_mode").and_then(|v| v.as_str()) {
-            out.extensions_mode = ExtensionsMode::from_str(mode);
+            out.extensions_mode = ExtensionsMode::parse(mode);
         }
         if let Some(arr) = extras.get("extra_flags").and_then(|v| v.as_array()) {
             out.extra_flags = arr
