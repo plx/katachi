@@ -24,6 +24,7 @@ pub mod materialize;
 pub mod mcp;
 pub mod planner;
 pub mod plugins;
+pub mod projection;
 pub mod roster;
 pub mod roster_file;
 pub mod rules;

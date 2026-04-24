@@ -216,6 +216,13 @@ pub enum HarnessAction {
         roster_id: String,
         prompt: String,
     },
+    /// Emit the effective config for a roster without running.
+    EffectiveConfig {
+        #[arg(value_name = "ROSTER_ID")]
+        roster_id: String,
+    },
+    /// Harness-specific diagnostics.
+    Doctor,
 }
 
 #[derive(Subcommand, Debug)]
