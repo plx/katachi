@@ -16,6 +16,7 @@
 //! ```
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::io;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -164,7 +165,9 @@ fn collect_settings_body(catalog: &RosterCatalog, scope: &str) -> Value {
 }
 
 fn pick_context(catalog: &RosterCatalog) -> Option<String> {
-    // Prefer project context, fall back to user.
+    // Prefer project context, fall back to user. Read the full file from
+    // the source path; the `preview` field on the discovered item is
+    // truncated and would silently drop content past ~512 bytes.
     for scope in ["project", "user"] {
         for (_, item) in catalog.iter_items() {
             if item.item_ref.kind != GeminiItemKind::ContextSource.as_str() {
@@ -173,8 +176,10 @@ fn pick_context(catalog: &RosterCatalog) -> Option<String> {
             if item.source.scope.as_deref() != Some(scope) {
                 continue;
             }
-            if let Some(preview) = item.raw.get("preview").and_then(|v| v.as_str()) {
-                return Some(preview.to_owned());
+            if let Some(path) = item.source.path.as_ref() {
+                if let Ok(body) = fs::read_to_string(path.as_std_path()) {
+                    return Some(body);
+                }
             }
         }
     }
@@ -438,5 +443,38 @@ mod tests {
         let item = user_settings_ref(&cat).unwrap();
         assert_eq!(item.kind, "settings_layer");
         assert_eq!(item.id, "settings:user");
+    }
+
+    #[test]
+    fn context_longer_than_preview_is_materialized_in_full() {
+        use crate::context::{ContextScope, ContextSource, to_discovered_item};
+
+        let tmp = TempDir::new().unwrap();
+        let utf_tmp = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+        let ctx_path = utf_tmp.join("GEMINI.md");
+        // Body well past the 512-byte preview cutoff with a sentinel near
+        // the end to prove the tail survived.
+        let body = format!("{}TAIL_SENTINEL\n", "x".repeat(2048));
+        fs::write(ctx_path.as_std_path(), &body).unwrap();
+        let cs = ContextSource {
+            path: ctx_path.clone(),
+            scope: ContextScope::Project,
+            file_name: "GEMINI.md".into(),
+            body_bytes: body.len() as u64,
+        };
+        let mut cat = make_catalog();
+        cat.insert_item(to_discovered_item(&cs)).unwrap();
+
+        let resolved = resolved_with(Vec::new());
+        let (mut overlay, manifest) =
+            materialize_overlay(&resolved, &cat, &[], true).unwrap();
+
+        let written = fs::read_to_string(
+            manifest.overlay_root.join(paths::PROJECT_CONTEXT).as_std_path(),
+        )
+        .unwrap();
+        assert_eq!(written, body);
+        assert!(written.contains("TAIL_SENTINEL"));
+        overlay.set_keep(KeepPolicy::Discard);
     }
 }

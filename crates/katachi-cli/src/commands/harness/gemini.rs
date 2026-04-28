@@ -348,7 +348,7 @@ pub fn run_plan(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result<Ex
         }
     };
     let definition = roster.to_katachi_definition();
-    let req = build_request_for_roster(global, roster_id, ctx.cwd.clone(), prompt);
+    let req = build_request_for_roster(global, &roster, ctx.cwd.clone(), prompt);
 
     let modules: Vec<&dyn HarnessModule> = vec![&harness];
     let inputs = ResolveInputs::new(&req, &definition, &modules, &ctx.config, &ctx.storage, &ctx.cwd);
@@ -476,7 +476,7 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
         }
     };
     let definition = roster.to_katachi_definition();
-    let req = build_request_for_roster(global, roster_id, ctx.cwd.clone(), prompt);
+    let req = build_request_for_roster(global, &roster, ctx.cwd.clone(), prompt);
 
     let modules: Vec<&dyn HarnessModule> = vec![&harness];
     let inputs = ResolveInputs::new(&req, &definition, &modules, &ctx.config, &ctx.storage, &ctx.cwd);
@@ -487,6 +487,18 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
             return Ok(ExitCode::Resolve);
         }
     };
+
+    if any_error(&out.resolved.diagnostics) {
+        for d in &out.resolved.diagnostics {
+            eprintln!(
+                "katachi harness gemini: [{}] {}: {}",
+                severity_tag(d.severity),
+                d.code,
+                d.message
+            );
+        }
+        return Ok(ExitCode::Resolve);
+    }
 
     // Run gemini validators before planning.
     let policy = ResolvedPolicy::from_catalog(&out.catalog);
@@ -631,12 +643,12 @@ fn rosters_dir(ctx: &Ctx) -> std::path::PathBuf {
 
 fn build_request_for_roster(
     global: &GlobalArgs,
-    roster_id: &str,
+    roster: &GeminiRoster,
     cwd: Utf8PathBuf,
     prompt: &str,
 ) -> InvocationRequest {
     let mut req = InvocationRequest::new(
-        roster_id,
+        &roster.id,
         ActionRequest::Execute {
             prompt: prompt.to_owned(),
         },
@@ -648,6 +660,9 @@ fn build_request_for_roster(
         .iter()
         .filter_map(|s| BackendKind::from_str(s).ok())
         .collect();
+    if let Some(m) = roster_materialization_mode(&roster.resolution.materialization) {
+        req.materialization = m;
+    }
     if let Some(m) = global.materialization {
         req.materialization = match m {
             MaterializationArg::Ambient => CoreMatMode::Ambient,
@@ -656,6 +671,14 @@ fn build_request_for_roster(
     }
     req.dry_run = global.dry_run;
     req
+}
+
+fn roster_materialization_mode(value: &str) -> Option<CoreMatMode> {
+    match value {
+        "ambient" => Some(CoreMatMode::Ambient),
+        "temp-overlay" => Some(CoreMatMode::TempOverlay),
+        _ => None,
+    }
 }
 
 // ---------------- doctor ----------------
@@ -772,7 +795,7 @@ pub fn run_dump_settings(global: &GlobalArgs, roster_id: &str) -> Result<ExitCod
         }
     };
     let definition = roster.to_katachi_definition();
-    let req = build_request_for_roster(global, roster_id, ctx.cwd.clone(), "");
+    let req = build_request_for_roster(global, &roster, ctx.cwd.clone(), "");
     let harness = GeminiHarness::new();
     let modules: Vec<&dyn HarnessModule> = vec![&harness];
     let inputs = ResolveInputs::new(
