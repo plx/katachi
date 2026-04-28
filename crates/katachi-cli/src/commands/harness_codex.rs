@@ -501,11 +501,15 @@ impl BuiltBundle {
             ActionRequest::Describe, // overridden by caller
             cwd.clone(),
         );
-        req.materialization = match self.roster.resolution.materialization.as_str() {
-            "ambient" => MaterializationMode::Ambient,
-            _ => MaterializationMode::TempOverlay,
-        };
+        req.materialization = roster_materialization_mode(&self.roster);
         req
+    }
+}
+
+fn roster_materialization_mode(roster: &CodexRosterFile) -> MaterializationMode {
+    match roster.resolution.materialization.as_str() {
+        "ambient" => MaterializationMode::Ambient,
+        _ => MaterializationMode::TempOverlay,
     }
 }
 
@@ -751,7 +755,7 @@ impl PlannedWithProjection {
             harness: katachi_core::model::HarnessKind::Codex,
             backend: self.planned.backend,
             materialization: MaterializationPlan {
-                mode: MaterializationMode::TempOverlay,
+                mode: roster_materialization_mode(roster),
                 overlay_root: None,
                 files: self.planned.materialization.files.clone(),
                 env: self.planned.materialization.env.clone(),
