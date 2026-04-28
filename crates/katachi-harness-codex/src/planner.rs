@@ -281,6 +281,10 @@ fn build_sdk_ts_argv(inputs: &CodexPlanInputs<'_>) -> Result<Vec<String>, PlanEr
     // Minimal shim: TypeScript SDK projections still need a materialized
     // `CODEX_HOME`. We project to a small node invocation that the
     // `katachi` user can customize; the concrete bridge can grow later.
+    //
+    // The project path is passed as a trailing argv token (rather than
+    // baked into the eval string) so the executor's argv rewriter can
+    // swap the `./project` placeholder for the absolute overlay path.
     let prompt = match &inputs.ctx.request.action {
         ActionRequest::Execute { prompt } | ActionRequest::Plan { prompt } => prompt.clone(),
         _ => String::new(),
@@ -289,10 +293,10 @@ fn build_sdk_ts_argv(inputs: &CodexPlanInputs<'_>) -> Result<Vec<String>, PlanEr
         "node".into(),
         "--eval".into(),
         format!(
-            "require('@openai/codex-sdk').run({{ prompt: {}, cd: {} }})",
+            "require('@openai/codex-sdk').run({{ prompt: {}, cd: process.argv[process.argv.length - 1] }})",
             json_string_literal(&prompt),
-            json_string_literal(&format!("./{}", crate::materialize::PROJECT_SUBDIR))
         ),
+        format!("./{}", crate::materialize::PROJECT_SUBDIR),
     ])
 }
 
@@ -461,6 +465,47 @@ mod tests {
             PlanError::ProjectionLoss { backend, .. } => assert_eq!(backend, "sdk-py"),
             other => panic!("wrong error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn sdk_ts_argv_passes_cd_as_standalone_token() {
+        let effective = minimal_effective(EffectivePolicy::default());
+        let mut roster = CodexRosterFile {
+            version: 1,
+            id: "r".into(),
+            description: None,
+            selection: Default::default(),
+            run_profile: RosterRunProfile::default(),
+            resolution: Default::default(),
+        };
+        roster.run_profile.backend = Some("sdk-ts".into());
+        let settings = CodexSettings::default();
+        let request = request("hello");
+        let resolved = resolved();
+        let run_id = RunId::new();
+        let ctx = PlanContext {
+            request: &request,
+            resolved: &resolved,
+            run_id,
+        };
+        let inputs = CodexPlanInputs {
+            ctx: &ctx,
+            roster: &roster,
+            effective: &effective,
+            settings: &settings,
+        };
+        let plan = plan(&inputs).unwrap();
+        let placeholder = format!("./{}", crate::materialize::PROJECT_SUBDIR);
+        // The cd path must be its own argv element so the executor can
+        // rewrite it to the absolute overlay path on materialization.
+        assert_eq!(
+            plan.command.last().map(String::as_str),
+            Some(placeholder.as_str())
+        );
+        // And it must NOT be embedded inside the eval string.
+        let eval_script = &plan.command[2];
+        assert!(!eval_script.contains(&placeholder));
+        assert!(eval_script.contains("process.argv"));
     }
 
     #[test]
