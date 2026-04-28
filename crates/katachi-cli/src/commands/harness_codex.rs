@@ -230,8 +230,25 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
         started_at: OffsetDateTime::now_utc(),
     });
 
-    let manifest = run_dir.write_manifest().ok();
-    let final_path = run_dir.commit().ok();
+    // Always try to finalize the run directory, even when execution failed,
+    // so partial transcripts and records are preserved. Surface any
+    // finalization failure: downstream tooling treats a missing manifest or
+    // un-committed run dir as a lost run.
+    let manifest = match run_dir.write_manifest() {
+        Ok(m) => Some(m),
+        Err(err) => {
+            eprintln!("katachi harness codex execute: writing run manifest: {err}");
+            None
+        }
+    };
+    let final_path = match run_dir.commit() {
+        Ok(p) => Some(p),
+        Err(err) => {
+            eprintln!("katachi harness codex execute: committing run directory: {err}");
+            None
+        }
+    };
+    let persist_failed = manifest.is_none() || final_path.is_none();
 
     match outcome {
         Ok(record) => {
@@ -243,12 +260,15 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
                     "run {} finished with outcome={:?}",
                     record.run_id, record.result.outcome
                 );
-                if let Some(path) = final_path {
+                if let Some(path) = &final_path {
                     println!("recorded at {}", path);
                 }
                 if manifest.is_some() {
                     println!("manifest written");
                 }
+            }
+            if persist_failed {
+                return Ok(ExitCode::Execute);
             }
             Ok(match record.result.outcome {
                 katachi_core::record::Outcome::Success => ExitCode::Ok,
