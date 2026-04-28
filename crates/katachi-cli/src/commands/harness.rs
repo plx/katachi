@@ -294,7 +294,7 @@ fn resolve_for_roster(
             cwd: &ctx.cwd,
         })
         .map_err(|err| anyhow!("{err:#}"))?;
-    let backend = resolve_backend(global, &roster);
+    let backend = resolve_backend(global, &roster, &ctx.claude_config);
     let resolved = resolve_roster(&roster, catalog, backend);
     let action = ActionRequest::Describe;
     let request = InvocationRequest::new(roster_id, action, ctx.cwd.clone());
@@ -304,6 +304,7 @@ fn resolve_for_roster(
 fn resolve_backend(
     global: &GlobalArgs,
     roster: &katachi_harness_claude::roster::ClaudeRoster,
+    claude_config: &ClaudeConfig,
 ) -> BackendKind {
     // CLI `--prefer-backend` wins over roster/config defaults.
     for b in &global.prefer_backend {
@@ -313,6 +314,9 @@ fn resolve_backend(
     }
     if let Some(b) = roster.backend() {
         return b;
+    }
+    if let Ok(parsed) = claude_config.default_backend.parse::<BackendKind>() {
+        return parsed;
     }
     BackendKind::Cli
 }
@@ -472,7 +476,7 @@ fn run_execute(
     // Always write manifest before committing.
     let _ = run_dir.write_manifest();
 
-    let exit = match &record_result {
+    let mut exit = match &record_result {
         Ok(rec) => match rec.result.outcome {
             katachi_core::record::Outcome::Success => ExitCode::Ok,
             katachi_core::record::Outcome::Failure
@@ -487,9 +491,9 @@ fn run_execute(
 
     // Commit on success, leave partial on failure (preserves diagnostics).
     if matches!(exit, ExitCode::Ok) {
-        match run_dir.commit() {
-            Ok(_) => {}
-            Err(err) => eprintln!("katachi harness claude execute: commit failed: {err:#}"),
+        if let Err(err) = run_dir.commit() {
+            eprintln!("katachi harness claude execute: commit failed: {err:#}");
+            exit = ExitCode::Execute;
         }
     }
 
