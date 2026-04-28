@@ -11,7 +11,7 @@
 //! scripts or resolve `~` or environment vars in TOML values — those are
 //! left as-is so the materializer can decide how to render them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
@@ -161,8 +161,23 @@ pub fn build_effective(inputs: BuildEffective<'_>) -> EffectiveCodexConfig {
         }
     }
     // Also include any MCPs that the selectors pulled in from non-merged
-    // layers. Union, precedence to merged.
+    // layers. Union, precedence to merged. When `only_active` is set, drop
+    // MCPs sourced from inactive (untrusted) layers so the trust gate also
+    // applies to MCP definitions, not just the merged config body.
+    let active_layer_ids: HashSet<&str> = if inputs.only_active {
+        inputs
+            .layers
+            .iter()
+            .filter(|l| l.active)
+            .map(|l| l.id.as_str())
+            .collect()
+    } else {
+        HashSet::new()
+    };
     for mcp in inputs.mcps {
+        if inputs.only_active && !active_layer_ids.contains(mcp.source_layer.as_str()) {
+            continue;
+        }
         mcp_servers
             .entry(mcp.name.clone())
             .or_insert_with(|| mcp.raw.clone());
@@ -525,6 +540,80 @@ command = "custom-chrome-mcp"
             eff.mcp_servers["chrome"]["command"],
             serde_json::Value::String("custom-chrome-mcp".into())
         );
+    }
+
+    #[test]
+    fn inactive_layer_mcps_dropped_when_only_active() {
+        let layers = [
+            layer("user", "", 100, true),
+            layer("project", "", 200, false),
+        ];
+        let mcps = [
+            crate::mcp::McpServer {
+                id: "user:trusted".into(),
+                name: "trusted".into(),
+                source_layer: "user".into(),
+                transport: "stdio".into(),
+                raw: serde_json::json!({"command": "trusted-mcp"}),
+                path: Utf8PathBuf::from("/fake/user.toml"),
+            },
+            crate::mcp::McpServer {
+                id: "project:untrusted".into(),
+                name: "untrusted".into(),
+                source_layer: "project".into(),
+                transport: "stdio".into(),
+                raw: serde_json::json!({"command": "untrusted-mcp"}),
+                path: Utf8PathBuf::from("/fake/project.toml"),
+            },
+        ];
+        let inputs = BuildEffective {
+            layers: &layers,
+            instructions: &[],
+            hooks: &[],
+            rules: &[],
+            mcps: &mcps,
+            skills: &[],
+            agents: &[],
+            run_profile: RosterRunProfile::default(),
+            active_profile: None,
+            only_active: true,
+        };
+        let eff = build_effective(inputs);
+        assert!(eff.mcp_servers.contains_key("trusted"));
+        assert!(
+            !eff.mcp_servers.contains_key("untrusted"),
+            "MCP servers from inactive (untrusted) layers must not leak into the effective config"
+        );
+    }
+
+    #[test]
+    fn inactive_layer_mcps_kept_when_only_active_disabled() {
+        let layers = [
+            layer("user", "", 100, true),
+            layer("project", "", 200, false),
+        ];
+        let mcps = [crate::mcp::McpServer {
+            id: "project:untrusted".into(),
+            name: "untrusted".into(),
+            source_layer: "project".into(),
+            transport: "stdio".into(),
+            raw: serde_json::json!({"command": "untrusted-mcp"}),
+            path: Utf8PathBuf::from("/fake/project.toml"),
+        }];
+        let inputs = BuildEffective {
+            layers: &layers,
+            instructions: &[],
+            hooks: &[],
+            rules: &[],
+            mcps: &mcps,
+            skills: &[],
+            agents: &[],
+            run_profile: RosterRunProfile::default(),
+            active_profile: None,
+            only_active: false,
+        };
+        let eff = build_effective(inputs);
+        assert!(eff.mcp_servers.contains_key("untrusted"));
     }
 
     #[test]
