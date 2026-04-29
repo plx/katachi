@@ -1,37 +1,26 @@
 //! `katachi harness <claude|codex|gemini> ...` dispatcher.
 //!
-//! Step 1: a concrete `gemini scan` implementation that produces a
-//! `RosterCatalog` using the real Gemini harness module. Other harness
-//! actions remain as `NotImplemented` stubs until their phase lands.
+//! Each harness has its own submodule that implements its actions; this
+//! file just routes by [`HarnessName`].
 
+pub mod claude;
 pub mod gemini;
 
 use anyhow::Result;
 
-use crate::cli::{GlobalArgs, HarnessAction, HarnessCmd, HarnessName};
+use crate::cli::{GlobalArgs, HarnessCmd, HarnessName};
 use crate::exit::ExitCode;
 
 pub fn dispatch(global: &GlobalArgs, cmd: HarnessCmd) -> Result<ExitCode> {
     match cmd.name {
+        HarnessName::Claude => claude::dispatch(global, cmd.action),
         HarnessName::Gemini => gemini::dispatch(global, cmd.action),
-        HarnessName::Claude | HarnessName::Codex => not_implemented(global, cmd),
+        HarnessName::Codex => {
+            eprintln!(
+                "katachi: `harness {}` is not yet implemented in this phase",
+                cmd.name.as_str()
+            );
+            Ok(ExitCode::NotImplemented)
+        }
     }
-}
-
-fn not_implemented(_global: &GlobalArgs, cmd: HarnessCmd) -> Result<ExitCode> {
-    let action_label = match cmd.action {
-        HarnessAction::Scan => "scan",
-        HarnessAction::Explain { .. } => "explain",
-        HarnessAction::Graph { .. } => "graph",
-        HarnessAction::Plan { .. } => "plan",
-        HarnessAction::Execute { .. } => "execute",
-        HarnessAction::Doctor => "doctor",
-        HarnessAction::DumpSettings { .. } => "dump-settings",
-    };
-    eprintln!(
-        "katachi: `harness {} {}` is not yet implemented in this phase",
-        cmd.name.as_str(),
-        action_label
-    );
-    Ok(ExitCode::NotImplemented)
 }

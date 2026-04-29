@@ -33,20 +33,39 @@ enum ExitSentinel {
     TimedOut,
 }
 
+/// Signature for harness-supplied stdout-line normalizers.
+pub type StdoutNormalizer<'a> = dyn Fn(&str) -> EventKind + Send + Sync + 'a;
+
 /// Run an execution plan synchronously on a private tokio runtime.
 ///
 /// Callers that are already inside a tokio runtime should use
 /// [`run_async`] directly.
 pub fn run(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> {
+    run_with_normalizer(ctx, None)
+}
+
+/// Like [`run`] but with a caller-supplied stdout-line normalizer.
+pub fn run_with_normalizer<'a>(
+    ctx: &ExecuteContext<'_>,
+    normalizer: Option<&'a StdoutNormalizer<'a>>,
+) -> Result<ExecutionRecord, ExecutionError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|source| ExecutionError::Io { source })?;
-    rt.block_on(run_async(ctx))
+    rt.block_on(run_async_with_normalizer(ctx, normalizer))
 }
 
 /// Run an execution plan as an async task in the current tokio runtime.
 pub async fn run_async(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> {
+    run_async_with_normalizer(ctx, None).await
+}
+
+/// Async entry point that accepts a per-invocation stdout normalizer.
+pub async fn run_async_with_normalizer<'a>(
+    ctx: &ExecuteContext<'_>,
+    normalizer: Option<&'a StdoutNormalizer<'a>>,
+) -> Result<ExecutionRecord, ExecutionError> {
     let started_at = ctx.started_at;
     let plan = ctx.plan;
     let request = ctx.request;
@@ -152,7 +171,7 @@ pub async fn run_async(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, Exec
             match line {
                 StreamLine::Stdout(text) => {
                     write_line(&mut stdout_log, &text).await?;
-                    let kind = stdout_kind(mode, text);
+                    let kind = stdout_kind_with_normalizer(mode, text, normalizer);
                     let ev = builder.push(kind);
                     transcript.append(&ev)?;
                 }
@@ -258,12 +277,21 @@ async fn write_line(file: &mut tokio::fs::File, line: &str) -> Result<(), Execut
     Ok(())
 }
 
-fn stdout_kind(mode: TranscriptMode, text: String) -> EventKind {
+fn stdout_kind_with_normalizer(
+    mode: TranscriptMode,
+    text: String,
+    normalizer: Option<&StdoutNormalizer<'_>>,
+) -> EventKind {
     match mode {
-        TranscriptMode::JsonStream => match serde_json::from_str::<Value>(&text) {
-            Ok(payload) => EventKind::JsonEvent { payload },
-            Err(_) => EventKind::StdoutText { text },
-        },
+        TranscriptMode::JsonStream => {
+            if let Some(f) = normalizer {
+                return f(&text);
+            }
+            match serde_json::from_str::<Value>(&text) {
+                Ok(payload) => EventKind::JsonEvent { payload },
+                Err(_) => EventKind::StdoutText { text },
+            }
+        }
         TranscriptMode::RawOnly => EventKind::StdoutText { text },
     }
 }
