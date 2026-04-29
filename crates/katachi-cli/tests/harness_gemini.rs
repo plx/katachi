@@ -260,6 +260,81 @@ fn doctor_reports_config() {
 }
 
 #[test]
+fn doctor_json_marks_binary_found_when_resolvable() {
+    let gx = Gx::new();
+    let out = gx.run(&["--json", "harness", "gemini", "doctor"]);
+    expect_status(&out, 0);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(v["binary_found"], serde_json::Value::Bool(true));
+    assert!(v["resolved_binary"].is_string());
+}
+
+#[test]
+fn doctor_returns_config_exit_when_binary_missing() {
+    let gx = Gx::new();
+    // Rewrite config to point at a binary name that is not on PATH.
+    fs::write(
+        &gx.config_path,
+        format!(
+            r#"
+version = 1
+
+[harnesses.gemini]
+enabled = true
+binary = "katachi-nonexistent-gemini-xyz"
+home = "{}"
+user_roots = ["{}"]
+project_roots = ["{}"]
+extension_roots = ["{}"]
+"#,
+            gx.fake_home.display(),
+            gx.fake_home.display(),
+            gx.cwd.display(),
+            gx.ext_root.display(),
+        ),
+    )
+    .unwrap();
+    let out = gx.run(&["harness", "gemini", "doctor"]);
+    // ExitCode::Config = 3.
+    expect_status(&out, 3);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("not on PATH"));
+}
+
+#[test]
+fn doctor_json_returns_config_exit_when_binary_missing() {
+    let gx = Gx::new();
+    fs::write(
+        &gx.config_path,
+        format!(
+            r#"
+version = 1
+
+[harnesses.gemini]
+enabled = true
+binary = "katachi-nonexistent-gemini-xyz"
+home = "{}"
+user_roots = ["{}"]
+project_roots = ["{}"]
+extension_roots = ["{}"]
+"#,
+            gx.fake_home.display(),
+            gx.fake_home.display(),
+            gx.cwd.display(),
+            gx.ext_root.display(),
+        ),
+    )
+    .unwrap();
+    let out = gx.run(&["--json", "harness", "gemini", "doctor"]);
+    expect_status(&out, 3);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(v["binary_found"], serde_json::Value::Bool(false));
+    assert!(v["resolved_binary"].is_null());
+}
+
+#[test]
 fn dump_settings_prints_layers() {
     let gx = Gx::new();
     // Write a user settings file.

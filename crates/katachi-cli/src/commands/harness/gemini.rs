@@ -816,6 +816,9 @@ pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
             }
         }
     }
+    if !report.binary_found {
+        return Ok(ExitCode::Config);
+    }
     Ok(ExitCode::Ok)
 }
 
