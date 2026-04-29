@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use katachi_core::harness::RosterCatalog;
-use katachi_core::materialize::{KeepPolicy, TempOverlay};
+use katachi_core::materialize::TempOverlay;
 use katachi_core::model::ItemRef;
 use katachi_core::plan::ResolvedKatachi;
 
@@ -56,16 +56,19 @@ pub struct OverlayManifest {
 }
 
 /// Build a temp overlay for a resolved Gemini run.
+///
+/// The returned overlay defaults to [`KeepPolicy::Discard`]; callers that
+/// want to preserve overlays after a failed run must flip the policy to
+/// `Keep` once the failure is observed (see the execute call site in
+/// `katachi-cli`). Doing it here would leak the overlay even on
+/// successful executes, eventually exhausting `/tmp` for long-lived
+/// users.
 pub fn materialize_overlay(
     resolved: &ResolvedKatachi,
     catalog: &RosterCatalog,
     extensions: &[DiscoveredExtension],
-    keep_failed: bool,
 ) -> io::Result<(TempOverlay, OverlayManifest)> {
     let mut overlay = TempOverlay::with_prefix("katachi-gemini-")?;
-    if keep_failed {
-        overlay.set_keep(KeepPolicy::Keep);
-    }
 
     let overlay_root = overlay.root().to_owned();
     let home_dir = overlay_root.join(paths::HOME);
@@ -385,8 +388,8 @@ mod tests {
         let ext = fixture_extension(&utf_tmp, "workspace-a11y");
         let resolved = resolved_with(vec![pick("extension", "workspace-a11y")]);
         let catalog = make_catalog();
-        let (mut overlay, manifest) =
-            materialize_overlay(&resolved, &catalog, &[ext], true).unwrap();
+        let (_overlay, manifest) =
+            materialize_overlay(&resolved, &catalog, &[ext]).unwrap();
 
         assert!(manifest.home_dir.exists());
         assert!(manifest
@@ -403,7 +406,6 @@ mod tests {
                 .join("home/.gemini/extensions/workspace-a11y");
             assert!(link.exists());
         }
-        overlay.set_keep(KeepPolicy::Discard);
     }
 
     #[test]
@@ -466,8 +468,8 @@ mod tests {
         cat.insert_item(to_discovered_item(&cs)).unwrap();
 
         let resolved = resolved_with(Vec::new());
-        let (mut overlay, manifest) =
-            materialize_overlay(&resolved, &cat, &[], true).unwrap();
+        let (_overlay, manifest) =
+            materialize_overlay(&resolved, &cat, &[]).unwrap();
 
         let written = fs::read_to_string(
             manifest.overlay_root.join(paths::PROJECT_CONTEXT).as_std_path(),
@@ -475,6 +477,49 @@ mod tests {
         .unwrap();
         assert_eq!(written, body);
         assert!(written.contains("TAIL_SENTINEL"));
-        overlay.set_keep(KeepPolicy::Discard);
+    }
+
+    #[test]
+    fn overlay_defaults_to_discard_so_successful_runs_clean_up() {
+        // The materializer must not pre-mark overlays as `Keep` — that
+        // would leak `/tmp/katachi-gemini-*` directories on every
+        // successful run. Preservation is the caller's responsibility,
+        // applied only after a failure is observed.
+        let resolved = resolved_with(Vec::new());
+        let catalog = make_catalog();
+        let overlay_root = {
+            let (overlay, _manifest) =
+                materialize_overlay(&resolved, &catalog, &[]).unwrap();
+            let root = overlay.root().to_owned();
+            assert!(root.exists(), "overlay root should exist before drop");
+            root
+            // overlay drops here
+        };
+        assert!(
+            !overlay_root.exists(),
+            "overlay at `{overlay_root}` should be cleaned up on drop"
+        );
+    }
+
+    #[test]
+    fn overlay_survives_drop_when_caller_flips_to_keep() {
+        // Mirrors what `katachi-cli` does after a failed run: it flips
+        // the keep policy to `Keep` so the overlay can be inspected.
+        use katachi_core::materialize::KeepPolicy;
+        let resolved = resolved_with(Vec::new());
+        let catalog = make_catalog();
+        let overlay_root = {
+            let (mut overlay, _manifest) =
+                materialize_overlay(&resolved, &catalog, &[]).unwrap();
+            overlay.set_keep(KeepPolicy::Keep);
+            overlay.root().to_owned()
+            // overlay drops here, but Keep should preserve it
+        };
+        assert!(
+            overlay_root.exists(),
+            "overlay at `{overlay_root}` should survive drop after Keep flip"
+        );
+        // Clean up after ourselves so we don't litter /tmp.
+        let _ = fs::remove_dir_all(overlay_root.as_std_path());
     }
 }

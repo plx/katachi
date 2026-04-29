@@ -533,7 +533,7 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
     }
 
     // Materialize before planning so the plan can point at the overlay.
-    let (_overlay_handle, overlay_manifest) = match req.materialization {
+    let (mut overlay_handle, overlay_manifest) = match req.materialization {
         CoreMatMode::TempOverlay => {
             match build_overlay(&ctx, &out.resolved, &out.catalog) {
                 Ok((ov, m)) => (Some(ov), Some(m)),
@@ -545,14 +545,47 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
         }
         CoreMatMode::Ambient => (None, None),
     };
+    let preserve_failed_overlays = GeminiConfig::from_katachi(&ctx.config)
+        .map(|g| g.preserve_failed_overlays)
+        .unwrap_or(true);
 
-    let run_id = RunId::new();
-    let plan = match build_plan_for_execute(
+    let result = run_after_overlay(
+        global,
+        &ctx,
+        &harness,
         &req,
         &out.resolved,
-        run_id,
         overlay_manifest.as_ref(),
-    ) {
+    );
+
+    let failed = !matches!(&result, Ok(ExitCode::Ok));
+    if failed && preserve_failed_overlays {
+        if let Some(overlay) = overlay_handle.as_mut() {
+            overlay.set_keep(KeepPolicy::Keep);
+            eprintln!(
+                "katachi harness gemini: preserved overlay for post-mortem at `{}`",
+                overlay.root()
+            );
+        }
+    }
+    result
+}
+
+/// Body of `run_execute` that runs after the overlay (if any) has been
+/// materialized. Split out so the caller can flip the overlay's keep
+/// policy after observing the exit code, instead of marking every
+/// overlay as `Keep` at materialization time (which would leak temp
+/// directories on every successful run).
+fn run_after_overlay(
+    global: &GlobalArgs,
+    ctx: &Ctx,
+    harness: &GeminiHarness,
+    req: &InvocationRequest,
+    resolved: &katachi_core::plan::ResolvedKatachi,
+    overlay_manifest: Option<&OverlayManifest>,
+) -> Result<ExitCode> {
+    let run_id = RunId::new();
+    let plan = match build_plan_for_execute(req, resolved, run_id, overlay_manifest) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("katachi harness gemini: {e}");
@@ -560,9 +593,9 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
         }
     };
     // Keep plan_ctx name for parity with previous code path.
-    let _ = (&plan, &harness, PlanContext {
-        request: &req,
-        resolved: &out.resolved,
+    let _ = (&plan, harness, PlanContext {
+        request: req,
+        resolved,
         run_id,
     });
 
@@ -579,7 +612,7 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
                 return Ok(ExitCode::Execute);
             }
         };
-    if let Err(e) = run_dir.write_request(&req) {
+    if let Err(e) = run_dir.write_request(req) {
         eprintln!("katachi harness gemini: {e}");
         return Ok(ExitCode::Execute);
     }
@@ -589,7 +622,7 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
     }
 
     let exec_ctx = katachi_core::harness::ExecuteContext {
-        request: &req,
+        request: req,
         plan: &plan,
         run_dir: &run_dir,
         started_at: time::OffsetDateTime::now_utc(),
@@ -906,13 +939,9 @@ fn build_overlay(
     let extension_roots = gcfg.resolved_extension_roots(&home);
     let ext_discovery = ExtensionDiscovery::discover(&extension_roots);
 
-    let (overlay, manifest) = materialize_overlay(
-        resolved,
-        catalog,
-        &ext_discovery.extensions,
-        gcfg.preserve_failed_overlays,
-    )
-    .map_err(|e| anyhow!("{e}"))?;
+    let (overlay, manifest) =
+        materialize_overlay(resolved, catalog, &ext_discovery.extensions)
+            .map_err(|e| anyhow!("{e}"))?;
     Ok((overlay, manifest))
 }
 
