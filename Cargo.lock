@@ -464,9 +464,19 @@ dependencies = [
 name = "katachi-harness-claude"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "camino",
+ "dirs",
+ "indexmap",
  "insta",
  "katachi-core",
+ "serde",
+ "serde_json",
  "tempfile",
+ "thiserror",
+ "time",
+ "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -490,9 +500,17 @@ dependencies = [
 name = "katachi-harness-gemini"
 version = "0.1.0"
 dependencies = [
+ "camino",
+ "indexmap",
  "insta",
  "katachi-core",
+ "serde",
+ "serde_json",
  "tempfile",
+ "thiserror",
+ "time",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

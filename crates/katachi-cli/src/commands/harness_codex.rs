@@ -38,6 +38,18 @@ pub fn dispatch(global: &GlobalArgs, cmd: &HarnessCmd) -> Result<ExitCode> {
         HarnessAction::Execute { roster_id, prompt } => {
             run_execute(global, roster_id, prompt)
         }
+        HarnessAction::DumpSettings { .. } => {
+            eprintln!("katachi: `harness codex dump-settings` is not yet implemented");
+            Ok(ExitCode::NotImplemented)
+        }
+        HarnessAction::DumpRoster { .. } => {
+            eprintln!("katachi: `harness codex dump-roster` is not yet implemented");
+            Ok(ExitCode::NotImplemented)
+        }
+        HarnessAction::Project { .. } => {
+            eprintln!("katachi: `harness codex project` is not yet implemented");
+            Ok(ExitCode::NotImplemented)
+        }
     }
 }
 
