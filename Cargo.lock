@@ -431,6 +431,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "time",
  "tracing",
  "tracing-subscriber",
  "which",
@@ -463,9 +464,19 @@ dependencies = [
 name = "katachi-harness-claude"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "camino",
+ "dirs",
+ "indexmap",
  "insta",
  "katachi-core",
+ "serde",
+ "serde_json",
  "tempfile",
+ "thiserror",
+ "time",
+ "toml",
+ "tracing",
 ]
 
 [[package]]
