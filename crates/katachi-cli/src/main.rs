@@ -28,7 +28,7 @@ fn dispatch(cli: Cli) -> ExitCode {
             }
         },
         Command::Have(have) => dispatch_have(&global, have),
-        Command::Harness(harness_cmd) => match commands::harness::run(&global, &harness_cmd) {
+        Command::Harness(cmd) => match commands::harness::dispatch(&global, cmd) {
             Ok(code) => code,
             Err(err) => {
                 eprintln!("katachi harness: {err:#}");

@@ -218,6 +218,11 @@ pub enum HarnessAction {
     },
     /// Harness environment + binary diagnostic.
     Doctor,
+    /// Dump effective settings for a roster (useful for debugging).
+    DumpSettings {
+        #[arg(value_name = "ROSTER_ID")]
+        roster_id: String,
+    },
     /// Dump a parsed roster plus its resolved selection for inspection.
     DumpRoster {
         #[arg(value_name = "ROSTER_ID")]
