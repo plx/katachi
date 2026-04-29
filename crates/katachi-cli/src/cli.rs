@@ -218,6 +218,11 @@ pub enum HarnessAction {
     },
     /// Harness environment + binary diagnostic.
     Doctor,
+    /// Emit the effective config for a roster without running.
+    EffectiveConfig {
+        #[arg(value_name = "ROSTER_ID")]
+        roster_id: String,
+    },
     /// Dump effective settings for a roster (useful for debugging).
     DumpSettings {
         #[arg(value_name = "ROSTER_ID")]

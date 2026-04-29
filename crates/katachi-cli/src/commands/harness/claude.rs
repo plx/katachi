@@ -51,6 +51,10 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
             eprintln!("katachi: `harness claude dump-settings` is not yet implemented");
             Ok(ExitCode::NotImplemented)
         }
+        HarnessAction::EffectiveConfig { .. } => {
+            eprintln!("katachi: `harness claude effective-config` is not yet implemented");
+            Ok(ExitCode::NotImplemented)
+        }
     }
 }
 

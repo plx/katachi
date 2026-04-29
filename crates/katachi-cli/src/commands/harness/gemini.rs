@@ -57,6 +57,10 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
             eprintln!("katachi: `harness gemini project` is not yet implemented");
             Ok(ExitCode::NotImplemented)
         }
+        HarnessAction::EffectiveConfig { .. } => {
+            eprintln!("katachi: `harness gemini effective-config` is not yet implemented");
+            Ok(ExitCode::NotImplemented)
+        }
     }
 }
 
