@@ -9,7 +9,7 @@ mod logging;
 
 use clap::Parser;
 
-use cli::{Cli, Command, GlobalArgs, HaveAction, HaveCmd};
+use cli::{Cli, Command, GlobalArgs, HaveAction, HaveCmd, HavePlanAction};
 use exit::ExitCode;
 
 fn main() -> std::process::ExitCode {
@@ -59,7 +59,28 @@ fn dispatch_have(global: &GlobalArgs, have: HaveCmd) -> ExitCode {
                 }
             }
         }
-        _ => not_yet_implemented(global, &Command::Have(have)),
+        HaveAction::Plan {
+            what: HavePlanAction::Execute { prompt },
+        } => {
+            let prompt = prompt.clone();
+            match commands::have::run_plan_execute(global, &have, &prompt) {
+                Ok(code) => code,
+                Err(err) => {
+                    eprintln!("katachi have plan: {err:#}");
+                    ExitCode::Config
+                }
+            }
+        }
+        HaveAction::Execute { prompt } => {
+            let prompt = prompt.clone();
+            match commands::have::run_execute(global, &have, &prompt) {
+                Ok(code) => code,
+                Err(err) => {
+                    eprintln!("katachi have execute: {err:#}");
+                    ExitCode::Config
+                }
+            }
+        }
     }
 }
 

@@ -52,6 +52,139 @@ pub fn run_describe(global: &GlobalArgs, have: &HaveCmd) -> Result<ExitCode> {
     Ok(prepared.exit_code())
 }
 
+pub fn run_plan_execute(
+    global: &GlobalArgs,
+    have: &HaveCmd,
+    prompt: &str,
+) -> Result<ExitCode> {
+    let prepared = match prepare(global, have)? {
+        Prepared::Ready(p) => p,
+        Prepared::Failed(code) => return Ok(code),
+    };
+    if let Some(code) = early_exit(&prepared) {
+        emit_prepared_diagnostics(global, &prepared);
+        return Ok(code);
+    }
+    let target_index = prepared.output.chosen_target_index;
+    let target = &prepared.definition.targets[target_index];
+    let Some(roster_id) = target.roster_id.clone() else {
+        emit_resolve_error_message(
+            global,
+            "have plan/execute currently requires the chosen target to use `roster_id` \
+             (cross-harness pure-selector planning lands in a follow-up).",
+        )?;
+        return Ok(ExitCode::NotImplemented);
+    };
+    delegate_plan(global, target.harness, &roster_id, prompt)
+}
+
+pub fn run_execute(global: &GlobalArgs, have: &HaveCmd, prompt: &str) -> Result<ExitCode> {
+    let prepared = match prepare(global, have)? {
+        Prepared::Ready(p) => p,
+        Prepared::Failed(code) => return Ok(code),
+    };
+    if let Some(code) = early_exit(&prepared) {
+        emit_prepared_diagnostics(global, &prepared);
+        return Ok(code);
+    }
+    let target_index = prepared.output.chosen_target_index;
+    let target = &prepared.definition.targets[target_index];
+    let Some(roster_id) = target.roster_id.clone() else {
+        emit_resolve_error_message(
+            global,
+            "have execute currently requires the chosen target to use `roster_id` \
+             (cross-harness pure-selector execution lands in a follow-up).",
+        )?;
+        return Ok(ExitCode::NotImplemented);
+    };
+    delegate_execute(global, target.harness, &roster_id, prompt)
+}
+
+fn early_exit(prepared: &PreparedHave) -> Option<ExitCode> {
+    if prepared.has_resolver_errors {
+        Some(ExitCode::Resolve)
+    } else if prepared.has_validation_errors {
+        Some(ExitCode::Validate)
+    } else {
+        None
+    }
+}
+
+fn emit_prepared_diagnostics(global: &GlobalArgs, prepared: &PreparedHave) {
+    if global.json {
+        let payload = serde_json::json!({
+            "katachi_id": prepared.definition.id,
+            "diagnostics": prepared
+                .output
+                .resolved
+                .diagnostics
+                .iter()
+                .chain(prepared.validator_diagnostics.iter())
+                .collect::<Vec<_>>(),
+        });
+        let _ = serde_json::to_writer_pretty(std::io::stdout(), &payload);
+        println!();
+    } else {
+        for d in prepared
+            .output
+            .resolved
+            .diagnostics
+            .iter()
+            .chain(prepared.validator_diagnostics.iter())
+        {
+            eprintln!("[{}] {}: {}", severity_tag(d.severity), d.code, d.message);
+        }
+    }
+}
+
+fn delegate_plan(
+    global: &GlobalArgs,
+    harness: HarnessKind,
+    roster_id: &str,
+    prompt: &str,
+) -> Result<ExitCode> {
+    use crate::cli::{HarnessAction, HarnessName, HarnessPlanAction};
+    let action = HarnessAction::Plan {
+        roster_id: roster_id.to_string(),
+        what: HarnessPlanAction::Execute {
+            prompt: prompt.to_string(),
+        },
+    };
+    let cmd = crate::cli::HarnessCmd {
+        name: harness_to_cli_name(harness),
+        action,
+    };
+    let _ = HarnessName::Claude; // suppress unused-import warning on some configs
+    crate::commands::harness::dispatch(global, cmd)
+}
+
+fn delegate_execute(
+    global: &GlobalArgs,
+    harness: HarnessKind,
+    roster_id: &str,
+    prompt: &str,
+) -> Result<ExitCode> {
+    use crate::cli::HarnessAction;
+    let action = HarnessAction::Execute {
+        roster_id: roster_id.to_string(),
+        prompt: prompt.to_string(),
+    };
+    let cmd = crate::cli::HarnessCmd {
+        name: harness_to_cli_name(harness),
+        action,
+    };
+    crate::commands::harness::dispatch(global, cmd)
+}
+
+fn harness_to_cli_name(harness: HarnessKind) -> crate::cli::HarnessName {
+    use crate::cli::HarnessName;
+    match harness {
+        HarnessKind::Claude => HarnessName::Claude,
+        HarnessKind::Codex => HarnessName::Codex,
+        HarnessKind::Gemini => HarnessName::Gemini,
+    }
+}
+
 pub fn run_graph(global: &GlobalArgs, have: &HaveCmd, format: GraphFormat) -> Result<ExitCode> {
     let prepared = match prepare(global, have)? {
         Prepared::Ready(p) => p,
