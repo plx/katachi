@@ -9,6 +9,7 @@
 
 use katachi_core::config::KatachiConfig;
 use katachi_core::harness::HarnessModule;
+use katachi_core::model::HarnessKind;
 
 use katachi_harness_claude::ClaudeHarness;
 use katachi_harness_codex::CodexHarness;
@@ -56,6 +57,13 @@ impl HarnessRegistry {
     /// Borrow the modules as trait references for [`ResolveInputs`].
     pub fn as_refs(&self) -> Vec<&dyn HarnessModule> {
         self.modules.iter().map(|m| m.as_ref()).collect()
+    }
+
+    pub fn find(&self, kind: HarnessKind) -> Option<&dyn HarnessModule> {
+        self.modules
+            .iter()
+            .map(|m| m.as_ref())
+            .find(|m| m.kind() == kind)
     }
 }
 
