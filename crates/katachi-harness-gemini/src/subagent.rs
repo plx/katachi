@@ -107,14 +107,15 @@ fn parse_file(path: &Utf8Path, owner: &SubagentOwner) -> Option<Subagent> {
         .get("description")
         .and_then(|v| v.as_str())
         .map(str::to_owned);
-    let model_hint = fm
-        .get("model")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned);
+    let model_hint = fm.get("model").and_then(|v| v.as_str()).map(str::to_owned);
     let tools = fm
         .get("tools")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
 
     let requires_preview = preview_flag(&fm);
@@ -132,7 +133,12 @@ fn parse_file(path: &Utf8Path, owner: &SubagentOwner) -> Option<Subagent> {
 }
 
 fn preview_flag(fm: &Value) -> bool {
-    let flags = ["preview", "experimental", "requiresPreview", "requires_preview"];
+    let flags = [
+        "preview",
+        "experimental",
+        "requiresPreview",
+        "requires_preview",
+    ];
     for flag in flags {
         if let Some(v) = fm.get(flag) {
             if v.as_bool() == Some(true) {
@@ -163,7 +169,11 @@ pub fn to_discovered_item(a: &Subagent) -> DiscoveredItem {
         capabilities.push("preview-required".into());
     }
     DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Gemini, GeminiItemKind::Subagent.as_str(), a.id.clone()),
+        item_ref: ItemRef::new(
+            HarnessKind::Gemini,
+            GeminiItemKind::Subagent.as_str(),
+            a.id.clone(),
+        ),
         display_name: a.id.clone(),
         source: ItemSource {
             path: Some(a.path.clone()),

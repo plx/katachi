@@ -26,7 +26,11 @@ pub struct McpServer {
 
 impl McpServer {
     pub fn item_ref(&self) -> ItemRef {
-        ItemRef::new(HarnessKind::Codex, CodexItemKind::McpServer.as_str(), &self.id)
+        ItemRef::new(
+            HarnessKind::Codex,
+            CodexItemKind::McpServer.as_str(),
+            &self.id,
+        )
     }
 
     pub fn to_item(&self) -> DiscoveredItem {
@@ -163,7 +167,10 @@ transport = "streamable-http"
 
         let chrome = out.iter().find(|m| m.name == "chrome").unwrap();
         assert_eq!(chrome.transport, "stdio");
-        let docs = out.iter().find(|m| m.name == "openaiDeveloperDocs").unwrap();
+        let docs = out
+            .iter()
+            .find(|m| m.name == "openaiDeveloperDocs")
+            .unwrap();
         assert_eq!(docs.transport, "streamable-http");
     }
 

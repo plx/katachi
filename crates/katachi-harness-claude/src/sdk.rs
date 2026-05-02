@@ -30,10 +30,7 @@ pub struct SdkProjection {
 /// Build an SDK projection for the given backend. Returns
 /// [`SdkProjection`] regardless of loss; callers render the
 /// diagnostics so operators know what they're giving up.
-pub fn project(
-    resolved: &ResolvedClaudeRoster,
-    backend: BackendKind,
-) -> SdkProjection {
+pub fn project(resolved: &ResolvedClaudeRoster, backend: BackendKind) -> SdkProjection {
     match backend {
         BackendKind::SdkTs => project_ts(resolved),
         BackendKind::SdkPy => project_py(resolved),
@@ -80,7 +77,11 @@ fn project_ts(resolved: &ResolvedClaudeRoster) -> SdkProjection {
         code.push_str(&format!("    settingSources: [{}],\n", ss.join(", ")));
     }
     if !profile.allowed_tools.is_empty() {
-        let t: Vec<String> = profile.allowed_tools.iter().map(|t| format!("{:?}", t)).collect();
+        let t: Vec<String> = profile
+            .allowed_tools
+            .iter()
+            .map(|t| format!("{:?}", t))
+            .collect();
         code.push_str(&format!("    allowedTools: [{}],\n", t.join(", ")));
     }
     if !profile.disallowed_tools.is_empty() {
@@ -142,7 +143,11 @@ fn project_py(resolved: &ResolvedClaudeRoster) -> SdkProjection {
         code.push_str(&format!("        setting_sources=[{}],\n", ss.join(", ")));
     }
     if !profile.allowed_tools.is_empty() {
-        let t: Vec<String> = profile.allowed_tools.iter().map(|t| format!("{:?}", t)).collect();
+        let t: Vec<String> = profile
+            .allowed_tools
+            .iter()
+            .map(|t| format!("{:?}", t))
+            .collect();
         code.push_str(&format!("        allowed_tools=[{}],\n", t.join(", ")));
     }
     if !profile.disallowed_tools.is_empty() {
@@ -151,10 +156,7 @@ fn project_py(resolved: &ResolvedClaudeRoster) -> SdkProjection {
             .iter()
             .map(|t| format!("{:?}", t))
             .collect();
-        code.push_str(&format!(
-            "        disallowed_tools=[{}],\n",
-            t.join(", ")
-        ));
+        code.push_str(&format!("        disallowed_tools=[{}],\n", t.join(", ")));
     }
     if let Some(max_turns) = profile.max_turns {
         code.push_str(&format!("        max_turns={},\n", max_turns));
@@ -247,8 +249,7 @@ max_turns = 5
                 .map(|p| format!("\"{p}\""))
                 .unwrap_or_default()
         );
-        let roster =
-            ClaudeRoster::from_toml_str(&Utf8PathBuf::from("t.toml"), &toml).unwrap();
+        let roster = ClaudeRoster::from_toml_str(&Utf8PathBuf::from("t.toml"), &toml).unwrap();
         resolve_roster(&roster, cat, BackendKind::Cli)
     }
 

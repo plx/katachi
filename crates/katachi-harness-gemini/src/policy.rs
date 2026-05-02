@@ -156,7 +156,11 @@ pub fn to_discovered_item(p: &PolicySet) -> DiscoveredItem {
         _ => None,
     };
     DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Gemini, GeminiItemKind::PolicySet.as_str(), p.id.clone()),
+        item_ref: ItemRef::new(
+            HarnessKind::Gemini,
+            GeminiItemKind::PolicySet.as_str(),
+            p.id.clone(),
+        ),
         display_name: p.id.clone(),
         source: ItemSource {
             path: Some(p.path.clone()),
@@ -234,10 +238,7 @@ impl ResolvedPolicy {
         let mut extension_policies: Vec<&Value> = Vec::new();
         for (_, item) in catalog.iter_items() {
             if item.item_ref.kind == crate::item::GeminiItemKind::PolicySet.as_str() {
-                if matches!(
-                    item.source.scope.as_deref(),
-                    Some("extension")
-                ) {
+                if matches!(item.source.scope.as_deref(), Some("extension")) {
                     if let Some(body) = item.raw.get("body") {
                         extension_policies.push(body);
                     }
@@ -253,10 +254,7 @@ impl ResolvedPolicy {
             return false;
         }
         if !self.allowed_extensions.is_empty()
-            && !self
-                .allowed_extensions
-                .iter()
-                .any(|n| n == extension_name)
+            && !self.allowed_extensions.iter().any(|n| n == extension_name)
         {
             return false;
         }
@@ -330,7 +328,10 @@ fn merge_from_restrictive(out: &mut ResolvedPolicy, body: &Value) {
             }
         }
     }
-    if let Some(arr) = body.get("forbiddenApprovalModes").and_then(|v| v.as_array()) {
+    if let Some(arr) = body
+        .get("forbiddenApprovalModes")
+        .and_then(|v| v.as_array())
+    {
         for v in arr {
             if let Some(name) = v.as_str() {
                 if !out.forbidden_approval_modes.iter().any(|s| s == name) {

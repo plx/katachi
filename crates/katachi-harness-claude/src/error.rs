@@ -16,10 +16,7 @@ pub enum ClaudeDiscoveryError {
         source: std::io::Error,
     },
     #[error("failed to parse frontmatter in `{path}`: {message}")]
-    Frontmatter {
-        path: Utf8PathBuf,
-        message: String,
-    },
+    Frontmatter { path: Utf8PathBuf, message: String },
     #[error("failed to parse `{path}` as JSON: {source}")]
     Json {
         path: Utf8PathBuf,

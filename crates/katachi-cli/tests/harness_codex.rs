@@ -68,7 +68,9 @@ respect_project_trust = false
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(self.fake_codex_path()).unwrap().permissions();
+            let mut perms = std::fs::metadata(self.fake_codex_path())
+                .unwrap()
+                .permissions();
             perms.set_mode(0o755);
             std::fs::set_permissions(self.fake_codex_path(), perms).unwrap();
         }
@@ -91,7 +93,10 @@ respect_project_trust = false
     }
 
     fn write_roster(&self, id: &str, body: &str) {
-        let p = self.data_root().join("rosters/codex").join(format!("{id}.toml"));
+        let p = self
+            .data_root()
+            .join("rosters/codex")
+            .join(format!("{id}.toml"));
         std::fs::write(p, body).unwrap();
     }
 
@@ -128,6 +133,22 @@ output_mode = "machine-readable"
 "#
 }
 
+fn sample_roster_without_backend() -> &'static str {
+    r#"
+version = 1
+id = "audit"
+description = "smoke-test audit"
+
+[selection]
+profiles = ["review"]
+
+[run_profile]
+approval_policy = "never"
+sandbox_mode = "read-only"
+model = "gpt-5.4"
+"#
+}
+
 fn sample_home_config() -> &'static str {
     r#"
 model = "gpt-5.4"
@@ -150,7 +171,11 @@ fn scan_lists_items_from_home_and_project() {
     fx.write_agents_md("project", "project instructions\n");
 
     let out = fx.run(&["harness", "codex", "scan"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("config_layer"));
     assert!(stdout.contains("profile"));
@@ -179,7 +204,11 @@ fn effective_config_resolves_policy_from_profile() {
     fx.write_roster("audit", sample_roster());
 
     let out = fx.run(&["harness", "codex", "effective-config", "audit"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("approval_policy: Some(\"never\")"));
     assert!(stdout.contains("sandbox_mode:    Some(\"read-only\")"));
@@ -194,11 +223,128 @@ fn plan_prints_full_argv() {
     fx.write_roster("audit", sample_roster());
 
     let out = fx.run(&["harness", "codex", "plan", "audit", "execute", "audit repo"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("fake-codex.sh") || stdout.contains("codex"));
     assert!(stdout.contains("--ask-for-approval never"));
     assert!(stdout.contains("--sandbox read-only"));
+}
+
+#[test]
+fn prefer_backend_beats_config_default_when_roster_unpinned() {
+    let fx = Fx::new();
+    fx.install_fake_codex();
+    fx.write_home_config(sample_home_config());
+    fx.write_roster("audit", sample_roster_without_backend());
+    let body = format!(
+        r#"version = 1
+
+[harnesses.codex]
+binary = "{bin}"
+default_backend = "sdk-ts"
+codex_home = "{home}"
+project_roots = ["."]
+respect_project_trust = false
+"#,
+        bin = fx.fake_codex_path().display(),
+        home = fx.codex_home().display(),
+    );
+    std::fs::write(fx.config_path(), body).unwrap();
+
+    let out = fx.run(&[
+        "--json",
+        "--prefer-backend",
+        "cli",
+        "harness",
+        "codex",
+        "plan",
+        "audit",
+        "execute",
+        "audit repo",
+    ]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["backend"], "cli");
+}
+
+#[test]
+fn roster_backend_beats_prefer_backend() {
+    let fx = Fx::new();
+    fx.install_fake_codex();
+    fx.write_home_config(sample_home_config());
+    fx.write_roster(
+        "audit",
+        r#"
+version = 1
+id = "audit"
+
+[selection]
+profiles = ["review"]
+
+[run_profile]
+backend = "sdk-ts"
+approval_policy = "never"
+sandbox_mode = "read-only"
+model = "gpt-5.4"
+"#,
+    );
+
+    let out = fx.run(&[
+        "--json",
+        "--prefer-backend",
+        "cli",
+        "harness",
+        "codex",
+        "plan",
+        "audit",
+        "execute",
+        "audit repo",
+    ]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["backend"], "sdk-ts");
+}
+
+#[test]
+fn unknown_roster_backend_is_rejected() {
+    let fx = Fx::new();
+    fx.install_fake_codex();
+    fx.write_home_config(sample_home_config());
+    fx.write_roster(
+        "audit",
+        r#"
+version = 1
+id = "audit"
+
+[selection]
+profiles = ["review"]
+
+[run_profile]
+backend = "nope"
+"#,
+    );
+
+    let out = fx.run(&["harness", "codex", "plan", "audit", "execute", "audit repo"]);
+    assert_eq!(out.status.code(), Some(3));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.contains("unknown codex roster backend `nope`"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -240,7 +386,11 @@ fn execute_dry_run_does_not_write_a_run() {
     fx.write_roster("audit", sample_roster());
 
     let out = fx.run(&["--dry-run", "harness", "codex", "execute", "audit", "hi"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("dry run"));
     let runs = fx.data_root().join("runs");

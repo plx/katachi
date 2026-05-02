@@ -14,6 +14,7 @@ use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverri
 use katachi_core::persist::{
     FILE_MANIFEST, FILE_PLAN, FILE_RECORD, FILE_REQUEST, FILE_TRANSCRIPT, PARTIAL_SUFFIX,
 };
+use katachi_core::transcript::{EventKind, TranscriptEvent};
 
 use crate::cli::{GlobalArgs, RunAction, RunCmd};
 use crate::exit::ExitCode;
@@ -107,10 +108,14 @@ fn build_summary(path: &Path, run_id: String, state: &'static str) -> RunSummary
                     .pointer("/result/outcome")
                     .and_then(|s| s.as_str())
                     .map(str::to_owned);
-                summary.started_at =
-                    v.pointer("/started_at").and_then(|s| s.as_str()).map(str::to_owned);
-                summary.finished_at =
-                    v.pointer("/finished_at").and_then(|s| s.as_str()).map(str::to_owned);
+                summary.started_at = v
+                    .pointer("/started_at")
+                    .and_then(|s| s.as_str())
+                    .map(str::to_owned);
+                summary.finished_at = v
+                    .pointer("/finished_at")
+                    .and_then(|s| s.as_str())
+                    .map(str::to_owned);
                 summary.harness = v
                     .pointer("/plan/harness")
                     .and_then(|s| s.as_str())
@@ -125,9 +130,7 @@ fn build_summary(path: &Path, run_id: String, state: &'static str) -> RunSummary
                 .push(format!("malformed record.json: {err}")),
         },
         Err(_) => {
-            summary
-                .diagnostics
-                .push(format!("missing {FILE_RECORD}"));
+            summary.diagnostics.push(format!("missing {FILE_RECORD}"));
         }
     }
     summary
@@ -214,9 +217,7 @@ fn run_show(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
             if let Some(outcome) = record.pointer("/result/outcome").and_then(|v| v.as_str()) {
                 println!("outcome: {outcome}");
             }
-            if let Some(exit_code) =
-                record.pointer("/result/exit_code").and_then(|v| v.as_i64())
-            {
+            if let Some(exit_code) = record.pointer("/result/exit_code").and_then(|v| v.as_i64()) {
                 println!("exit  : {exit_code}");
             }
         }
@@ -253,13 +254,17 @@ fn run_transcript(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
         .to_string();
     let committed = runs_dir.join(&id);
     let partial = runs_dir.join(format!("{id}{PARTIAL_SUFFIX}"));
-    let path = if committed.is_dir() {
-        committed
-    } else if partial.is_dir() {
-        partial
-    } else {
-        emit_run_not_found(global, &id);
-        return Ok(ExitCode::Resolve);
+    let (state, path) = match (committed.is_dir(), partial.is_dir()) {
+        (true, true) => {
+            emit_inconsistent(global, &id, &committed, &partial);
+            return Ok(ExitCode::Resolve);
+        }
+        (true, false) => ("committed", committed),
+        (false, true) => ("partial", partial),
+        (false, false) => {
+            emit_run_not_found(global, &id);
+            return Ok(ExitCode::Resolve);
+        }
     };
     let transcript = path.join(FILE_TRANSCRIPT);
     let raw = match fs::read_to_string(&transcript) {
@@ -275,46 +280,66 @@ fn run_transcript(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
                 let _ = serde_json::to_writer_pretty(std::io::stdout(), &payload);
                 println!();
             } else {
-                eprintln!("katachi run transcript: no transcript at `{}`", transcript.display());
+                eprintln!(
+                    "katachi run transcript: no transcript at `{}`",
+                    transcript.display()
+                );
             }
             return Ok(ExitCode::Resolve);
         }
     };
 
-    let mut events: Vec<Value> = Vec::new();
+    let mut events: Vec<TranscriptLine> = Vec::new();
     let mut diagnostics: Vec<String> = Vec::new();
     for (lineno, line) in raw.lines().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
-        match serde_json::from_str::<Value>(line) {
-            Ok(v) => events.push(v),
-            Err(err) => diagnostics.push(format!("line {}: {}", lineno + 1, err)),
+        match serde_json::from_str::<TranscriptEvent>(line) {
+            Ok(event) => events.push(TranscriptLine::from_typed(lineno, event)?),
+            Err(typed_err) => match serde_json::from_str::<Value>(line) {
+                Ok(value) => {
+                    diagnostics.push(format!(
+                        "line {}: forward-compatible event shape: {}",
+                        lineno + 1,
+                        typed_err
+                    ));
+                    events.push(TranscriptLine::from_value(lineno, value));
+                }
+                Err(err) => diagnostics.push(format!("line {}: {}", lineno + 1, err)),
+            },
         }
     }
+    events.sort_by(|a, b| {
+        a.seq
+            .unwrap_or(u64::MAX)
+            .cmp(&b.seq.unwrap_or(u64::MAX))
+            .then(a.lineno.cmp(&b.lineno))
+    });
 
     if global.json {
+        let event_values: Vec<Value> = events.iter().map(|e| e.value.clone()).collect();
         let payload = serde_json::json!({
             "run_id": id,
-            "events": events,
+            "state": state,
+            "path": path.display().to_string(),
+            "events": event_values,
             "diagnostics": diagnostics,
         });
         serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
         println!();
     } else {
         for event in &events {
-            let seq = event.get("seq").and_then(|v| v.as_i64()).unwrap_or(-1);
-            let ts = event
-                .get("timestamp")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-");
-            let kind = event
-                .get("kind")
-                .and_then(|k| {
-                    k.as_object().and_then(|obj| obj.keys().next().cloned())
-                })
-                .unwrap_or_else(|| "unknown".into());
-            println!("{seq:>4} {ts} {kind}");
+            let seq = event
+                .seq
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "-".into());
+            println!(
+                "{seq:>4} {} {} {}",
+                event.ts.as_deref().unwrap_or("-"),
+                event.kind,
+                event.summary
+            );
         }
         if !diagnostics.is_empty() {
             println!();
@@ -325,6 +350,93 @@ fn run_transcript(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::Ok)
+}
+
+struct TranscriptLine {
+    lineno: usize,
+    seq: Option<u64>,
+    ts: Option<String>,
+    kind: String,
+    summary: String,
+    value: Value,
+}
+
+impl TranscriptLine {
+    fn from_typed(lineno: usize, event: TranscriptEvent) -> Result<Self> {
+        let value = serde_json::to_value(&event)?;
+        let kind = value
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned();
+        let ts = value.get("ts").and_then(Value::as_str).map(str::to_owned);
+        let summary = summarize_event(&event.kind);
+        Ok(Self {
+            lineno,
+            seq: Some(event.seq),
+            ts,
+            kind,
+            summary,
+            value,
+        })
+    }
+
+    fn from_value(lineno: usize, value: Value) -> Self {
+        let seq = value.get("seq").and_then(Value::as_u64);
+        let ts = value
+            .get("ts")
+            .or_else(|| value.get("timestamp"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let kind = value
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("json_event")
+            .to_owned();
+        Self {
+            lineno,
+            seq,
+            ts,
+            kind,
+            summary: "raw event".into(),
+            value,
+        }
+    }
+}
+
+fn summarize_event(kind: &EventKind) -> String {
+    match kind {
+        EventKind::StdoutText { text } => clipped(text),
+        EventKind::StderrText { text } => clipped(text),
+        EventKind::JsonEvent { payload } => payload
+            .get("type")
+            .and_then(Value::as_str)
+            .map(|ty| format!("type={ty}"))
+            .unwrap_or_else(|| "json payload".into()),
+        EventKind::ToolUse { name, .. } => format!("name={name}"),
+        EventKind::ToolResult { name, is_error, .. } => {
+            if *is_error {
+                format!("name={name} error=true")
+            } else {
+                format!("name={name}")
+            }
+        }
+        EventKind::AssistantMessage { text } => clipped(text),
+        EventKind::UserMessage { text } => clipped(text),
+        EventKind::Warning { code, message } => format!("{code}: {}", clipped(message)),
+        EventKind::Result { summary, outcome } => format!("{outcome}: {}", clipped(summary)),
+    }
+}
+
+fn clipped(text: &str) -> String {
+    let normalized = text.replace(['\r', '\n'], " ");
+    let mut chars = normalized.chars();
+    let clipped: String = chars.by_ref().take(96).collect();
+    if chars.next().is_some() {
+        format!("{clipped}...")
+    } else {
+        clipped
+    }
 }
 
 fn read_optional_json(path: &Path) -> Option<Value> {

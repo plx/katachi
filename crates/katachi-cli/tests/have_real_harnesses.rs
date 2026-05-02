@@ -150,7 +150,8 @@ enabled = false
     let out = fx.run(&["have", "greet", "describe"]);
     let code = out.status.code().unwrap_or(-1);
     assert_eq!(
-        code, 4,
+        code,
+        4,
         "expected ExitCode::Resolve when no enabled harness matches; stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -174,7 +175,11 @@ fn have_graph_text_renders_selected_items_and_edges() {
 fn have_graph_dot_emits_digraph_block() {
     let fx = ClaudeProject::new();
     let out = fx.run(&["have", "greet", "graph", "--format", "dot"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.starts_with("digraph "), "dot output: {stdout}");
     assert!(stdout.contains("rankdir=LR"));
@@ -184,7 +189,11 @@ fn have_graph_dot_emits_digraph_block() {
 fn have_graph_json_is_parseable() {
     let fx = ClaudeProject::new();
     let out = fx.run(&["have", "greet", "graph", "--json"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
     assert_eq!(v["katachi_id"], "greet");

@@ -214,10 +214,11 @@ fn build_cli_plan(inputs: ClaudePlanInputs<'_>) -> Result<ExecutionPlan, PlanErr
         .as_ref()
         .and_then(|root| {
             let project = root.join("project");
-            if project.exists() || materialization
-                .files
-                .iter()
-                .any(|f| f.dest.starts_with("project"))
+            if project.exists()
+                || materialization
+                    .files
+                    .iter()
+                    .any(|f| f.dest.starts_with("project"))
             {
                 Some(project)
             } else {
@@ -380,10 +381,7 @@ pub fn build_overlay_plan(resolved: &ResolvedClaudeRoster) -> MaterializationPla
     }
 }
 
-fn collect_instruction(
-    item: &DiscoveredItem,
-    out: &mut Vec<(Utf8PathBuf, String)>,
-) {
+fn collect_instruction(item: &DiscoveredItem, out: &mut Vec<(Utf8PathBuf, String)>) {
     let Some(kind) = item.raw.get("kind").and_then(|v| v.as_str()) else {
         return;
     };
@@ -414,8 +412,7 @@ pub fn roster_run_profile(roster: &ClaudeRoster) -> RunProfile {
 /// argv reference overlay paths before the overlay is materialized.
 pub fn overlay_root_for_run(run_id: katachi_core::record::RunId) -> Utf8PathBuf {
     let base = std::env::temp_dir();
-    let utf8 = Utf8PathBuf::from_path_buf(base)
-        .unwrap_or_else(|_| Utf8PathBuf::from("/tmp"));
+    let utf8 = Utf8PathBuf::from_path_buf(base).unwrap_or_else(|_| Utf8PathBuf::from("/tmp"));
     utf8.join(format!("katachi-claude-{run_id}"))
 }
 
@@ -468,9 +465,7 @@ pub fn materialize_overlay(
                 }
             }
         }
-        return Ok(MaterializedOverlay::Fixed {
-            root: root.clone(),
-        });
+        return Ok(MaterializedOverlay::Fixed { root: root.clone() });
     }
     let mut overlay = katachi_core::materialize::TempOverlay::with_prefix("katachi-claude-")?;
     for file in &plan.files {
@@ -502,9 +497,8 @@ fn copy_dir_recursive(src: &Utf8Path, dst: &Utf8Path) -> std::io::Result<()> {
         let name = name.to_str().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "non-UTF-8 entry")
         })?;
-        let src_path = Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "non-UTF-8 path")
-        })?;
+        let src_path = Utf8PathBuf::from_path_buf(entry.path())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "non-UTF-8 path"))?;
         let dst_path = dst.join(name);
         if ty.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
@@ -584,7 +578,9 @@ mod tests {
     use crate::resolve::resolve_roster;
     use crate::roster::ClaudeRoster;
     use camino::Utf8PathBuf;
-    use katachi_core::harness::{DependencyEdge, DiscoveredItem, EdgeKind, ItemSource, RosterCatalog};
+    use katachi_core::harness::{
+        DependencyEdge, DiscoveredItem, EdgeKind, ItemSource, RosterCatalog,
+    };
     use katachi_core::model::{BackendKind, HarnessKind, ItemRef};
     use katachi_core::record::RunId;
 
@@ -641,7 +637,10 @@ bare = false
         assert!(plan.execution.argv.contains(&"--model".into()));
         assert!(plan.execution.argv.contains(&"sonnet".into()));
         assert!(plan.execution.argv.contains(&"--permission-mode".into()));
-        assert!(plan.execution.argv.contains(&"--append-system-prompt".into()));
+        assert!(plan
+            .execution
+            .argv
+            .contains(&"--append-system-prompt".into()));
         assert_eq!(plan.transcript_mode, TranscriptMode::JsonStream);
         assert!(plan
             .execution

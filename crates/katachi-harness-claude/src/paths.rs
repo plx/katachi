@@ -147,7 +147,10 @@ pub fn discover_roots(cwd: &Utf8Path, config: &ClaudeConfig) -> DiscoveredRoots 
         scope: ClaudeScope::User,
     });
 
-    let top_level_user_claude_md = expanded.user_root.parent().map(|parent| parent.join("CLAUDE.md"));
+    let top_level_user_claude_md = expanded
+        .user_root
+        .parent()
+        .map(|parent| parent.join("CLAUDE.md"));
     // User-scoped `~/CLAUDE.md` is unusual but legal; we keep the scan
     // tolerant and only record the entry when the path is distinct from
     // the user `.claude/CLAUDE.md` we already cover above.
@@ -288,7 +291,11 @@ mod tests {
         )
         .unwrap();
         fs::create_dir_all(cwd.join(".claude/agents")).unwrap();
-        fs::write(cwd.join(".claude/agents/reviewer.md"), "---\nname: reviewer\n---\n").unwrap();
+        fs::write(
+            cwd.join(".claude/agents/reviewer.md"),
+            "---\nname: reviewer\n---\n",
+        )
+        .unwrap();
         fs::create_dir_all(cwd.join(".claude/rules")).unwrap();
         fs::write(cwd.join(".claude/rules/style.md"), "be nice").unwrap();
         fs::write(cwd.join("CLAUDE.md"), "top level instructions").unwrap();

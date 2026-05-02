@@ -88,7 +88,9 @@ pub fn materialize_overlay(
     let user_settings = collect_settings_body(catalog, "user");
     let home_settings = serde_json::to_string_pretty(&user_settings)?;
     let generated = overlay.write_inline(paths::HOME_SETTINGS, &home_settings)?;
-    manifest.generated_files.push(path_or_rel(&generated, &overlay_root));
+    manifest
+        .generated_files
+        .push(path_or_rel(&generated, &overlay_root));
 
     // Generate `project/.gemini/settings.json` from project-layer.
     let project_settings = collect_settings_body(catalog, "project");
@@ -122,7 +124,9 @@ pub fn materialize_overlay(
             #[cfg(unix)]
             {
                 let created = overlay.symlink(&rel, &ext.root)?;
-                manifest.extensions.push(path_or_rel(&created, &overlay_root));
+                manifest
+                    .extensions
+                    .push(path_or_rel(&created, &overlay_root));
             }
             #[cfg(not(unix))]
             {
@@ -138,21 +142,23 @@ pub fn materialize_overlay(
 
     // Populate env vars so the child process sees the temp home as its
     // real home and the temp project as its cwd.
-    manifest
-        .env
-        .insert("HOME".into(), home_dir.to_string());
+    manifest.env.insert("HOME".into(), home_dir.to_string());
     manifest
         .env
         .insert("GEMINI_HOME".into(), home_dir.join(".gemini").to_string());
-    manifest
-        .env
-        .insert("XDG_CONFIG_HOME".into(), home_dir.join(".config").to_string());
+    manifest.env.insert(
+        "XDG_CONFIG_HOME".into(),
+        home_dir.join(".config").to_string(),
+    );
 
     Ok((overlay, manifest))
 }
 
 fn path_or_rel(abs: &Utf8Path, root: &Utf8Path) -> Utf8PathBuf {
-    abs.strip_prefix(root).ok().map(Utf8PathBuf::from).unwrap_or_else(|| abs.to_owned())
+    abs.strip_prefix(root)
+        .ok()
+        .map(Utf8PathBuf::from)
+        .unwrap_or_else(|| abs.to_owned())
 }
 
 fn collect_settings_body(catalog: &RosterCatalog, scope: &str) -> Value {
@@ -265,10 +271,7 @@ pub fn summarize_manifest(manifest: &OverlayManifest) -> String {
     s.push_str(manifest.home_dir.as_str());
     s.push_str("\nproject: ");
     s.push_str(manifest.project_dir.as_str());
-    s.push_str(&format!(
-        "\nextensions: {}\n",
-        manifest.extensions.len()
-    ));
+    s.push_str(&format!("\nextensions: {}\n", manifest.extensions.len()));
     for (k, v) in &manifest.env {
         s.push_str(&format!("env {k}={v}\n"));
     }
@@ -296,9 +299,7 @@ mod tests {
     use super::*;
     use katachi_core::diagnostic::Diagnostic;
     use katachi_core::model::{BackendKind, HarnessKind};
-    use katachi_core::plan::{
-        ResolvedItemRef, ResolvedKatachi, RunProfile, SelectionReason,
-    };
+    use katachi_core::plan::{ResolvedItemRef, ResolvedKatachi, RunProfile, SelectionReason};
     use katachi_core::roster::{DiscoveredItem, ItemSource, RosterCatalog};
     use std::fs;
     use tempfile::TempDir;
@@ -343,11 +344,8 @@ mod tests {
 
     fn make_catalog() -> RosterCatalog {
         let mut cat = RosterCatalog::empty(HarnessKind::Gemini);
-        cat.insert_item(settings_item(
-            "user",
-            serde_json::json!({"theme": "dark"}),
-        ))
-        .unwrap();
+        cat.insert_item(settings_item("user", serde_json::json!({"theme": "dark"})))
+            .unwrap();
         cat.insert_item(settings_item(
             "project",
             serde_json::json!({"model": "gemini-3"}),
@@ -388,8 +386,7 @@ mod tests {
         let ext = fixture_extension(&utf_tmp, "workspace-a11y");
         let resolved = resolved_with(vec![pick("extension", "workspace-a11y")]);
         let catalog = make_catalog();
-        let (_overlay, manifest) =
-            materialize_overlay(&resolved, &catalog, &[ext]).unwrap();
+        let (_overlay, manifest) = materialize_overlay(&resolved, &catalog, &[ext]).unwrap();
 
         assert!(manifest.home_dir.exists());
         assert!(manifest
@@ -449,7 +446,7 @@ mod tests {
 
     #[test]
     fn context_longer_than_preview_is_materialized_in_full() {
-        use crate::context::{ContextScope, ContextSource, to_discovered_item};
+        use crate::context::{to_discovered_item, ContextScope, ContextSource};
 
         let tmp = TempDir::new().unwrap();
         let utf_tmp = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
@@ -468,11 +465,13 @@ mod tests {
         cat.insert_item(to_discovered_item(&cs)).unwrap();
 
         let resolved = resolved_with(Vec::new());
-        let (_overlay, manifest) =
-            materialize_overlay(&resolved, &cat, &[]).unwrap();
+        let (_overlay, manifest) = materialize_overlay(&resolved, &cat, &[]).unwrap();
 
         let written = fs::read_to_string(
-            manifest.overlay_root.join(paths::PROJECT_CONTEXT).as_std_path(),
+            manifest
+                .overlay_root
+                .join(paths::PROJECT_CONTEXT)
+                .as_std_path(),
         )
         .unwrap();
         assert_eq!(written, body);
@@ -488,8 +487,7 @@ mod tests {
         let resolved = resolved_with(Vec::new());
         let catalog = make_catalog();
         let overlay_root = {
-            let (overlay, _manifest) =
-                materialize_overlay(&resolved, &catalog, &[]).unwrap();
+            let (overlay, _manifest) = materialize_overlay(&resolved, &catalog, &[]).unwrap();
             let root = overlay.root().to_owned();
             assert!(root.exists(), "overlay root should exist before drop");
             root
@@ -509,8 +507,7 @@ mod tests {
         let resolved = resolved_with(Vec::new());
         let catalog = make_catalog();
         let overlay_root = {
-            let (mut overlay, _manifest) =
-                materialize_overlay(&resolved, &catalog, &[]).unwrap();
+            let (mut overlay, _manifest) = materialize_overlay(&resolved, &catalog, &[]).unwrap();
             overlay.set_keep(KeepPolicy::Keep);
             overlay.root().to_owned()
             // overlay drops here, but Keep should preserve it

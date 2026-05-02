@@ -159,10 +159,7 @@ impl CodexRosterFile {
 
     /// Project the selection into a [`katachi_core::selector::SelectorSet`]
     /// scoped to the Codex harness.
-    pub fn to_selector_set(
-        &self,
-        include_closure: bool,
-    ) -> katachi_core::selector::SelectorSet {
+    pub fn to_selector_set(&self, include_closure: bool) -> katachi_core::selector::SelectorSet {
         use katachi_core::selector::{Selector, SelectorSet};
         let mut selectors: Vec<Selector> = Vec::new();
         for (kind, ids) in self.selection.by_kind() {
@@ -192,10 +189,7 @@ impl CodexRosterFile {
             );
         }
         if let Some(v) = &self.run_profile.sandbox_mode {
-            obj.insert(
-                "sandbox_mode".into(),
-                serde_json::Value::String(v.clone()),
-            );
+            obj.insert("sandbox_mode".into(), serde_json::Value::String(v.clone()));
         }
         if let Some(v) = &self.run_profile.model {
             obj.insert("model".into(), serde_json::Value::String(v.clone()));
@@ -207,10 +201,7 @@ impl CodexRosterFile {
             obj.insert("output_mode".into(), serde_json::Value::String(v.clone()));
         }
         if let Some(v) = self.run_profile.timeout_secs {
-            obj.insert(
-                "timeout_secs".into(),
-                serde_json::Value::Number(v.into()),
-            );
+            obj.insert("timeout_secs".into(), serde_json::Value::Number(v.into()));
         }
         if obj.is_empty() {
             serde_json::Value::Null
@@ -379,10 +370,7 @@ id = "x"
             grouped.get(&CodexItemKind::Skill).unwrap(),
             &vec!["accessibility-audit"]
         );
-        assert_eq!(
-            grouped.get(&CodexItemKind::McpServer).unwrap().len(),
-            2
-        );
+        assert_eq!(grouped.get(&CodexItemKind::McpServer).unwrap().len(), 2);
     }
 
     #[test]

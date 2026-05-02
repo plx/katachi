@@ -50,7 +50,11 @@ impl Skill {
             "mcp_requirements": self.mcp_requirements.clone(),
         });
         let mut capabilities: Vec<String> = Vec::new();
-        if let Some(caps) = self.frontmatter.get("capabilities").and_then(|v| v.as_array()) {
+        if let Some(caps) = self
+            .frontmatter
+            .get("capabilities")
+            .and_then(|v| v.as_array())
+        {
             for c in caps {
                 if let Some(s) = c.as_str() {
                     capabilities.push(s.to_string());
@@ -181,10 +185,7 @@ fn load_skill(dir: &Utf8Path, scope: &str, diagnostics: &mut Vec<Diagnostic>) ->
             return None;
         }
     };
-    let id = dir
-        .file_name()
-        .unwrap_or("unnamed")
-        .to_string();
+    let id = dir.file_name().unwrap_or("unnamed").to_string();
 
     let (frontmatter_value, summary) = parse_frontmatter(&raw, diagnostics, &skill_md);
     let display_name = frontmatter_value

@@ -13,7 +13,9 @@ use katachi_core::error::ResolveError;
 use katachi_core::harness::RosterCatalog;
 use katachi_core::katachi::{KatachiDefinition, KatachiStore, KatachiStoreError, KatachiTarget};
 use katachi_core::model::{BackendKind, HarnessKind, ItemRef, MaterializationMode};
-use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides, StoragePaths};
+use katachi_core::paths::{
+    resolve_config_file, resolve_storage_paths, PathOverrides, StoragePaths,
+};
 use katachi_core::plan::{
     ActionRequest, InvocationRequest, ResolvedItemRef, ResolvedKatachi, SelectionReason,
 };
@@ -52,11 +54,7 @@ pub fn run_describe(global: &GlobalArgs, have: &HaveCmd) -> Result<ExitCode> {
     Ok(prepared.exit_code())
 }
 
-pub fn run_plan_execute(
-    global: &GlobalArgs,
-    have: &HaveCmd,
-    prompt: &str,
-) -> Result<ExitCode> {
+pub fn run_plan_execute(global: &GlobalArgs, have: &HaveCmd, prompt: &str) -> Result<ExitCode> {
     let prepared = match prepare(global, have)? {
         Prepared::Ready(p) => p,
         Prepared::Failed(code) => return Ok(code),
@@ -214,8 +212,7 @@ pub fn run_graph(global: &GlobalArgs, have: &HaveCmd, format: GraphFormat) -> Re
             .collect(),
     };
 
-    let render_json =
-        global.json || matches!(format, GraphFormat::Json);
+    let render_json = global.json || matches!(format, GraphFormat::Json);
     if render_json {
         serde_json::to_writer_pretty(std::io::stdout(), &graph_view)?;
         println!();
@@ -400,9 +397,7 @@ fn project_claude_target(
     let roster = store
         .find(roster_id)
         .ok_or_else(|| format!("claude roster `{roster_id}` not found"))?;
-    let backend = base
-        .backend
-        .or_else(|| roster.backend());
+    let backend = base.backend.or_else(|| roster.backend());
     Ok(KatachiTarget {
         harness: HarnessKind::Claude,
         roster_id: Some(roster_id.to_string()),
@@ -419,7 +414,8 @@ fn project_codex_target(
     storage: &StoragePaths,
 ) -> std::result::Result<KatachiTarget, String> {
     let dir = storage.rosters_dir().join("codex");
-    let rosters = load_codex_rosters(&dir).map_err(|err| format!("loading codex rosters: {err}"))?;
+    let rosters =
+        load_codex_rosters(&dir).map_err(|err| format!("loading codex rosters: {err}"))?;
     let roster = rosters
         .into_iter()
         .find(|r| r.id == roster_id)
@@ -481,9 +477,7 @@ fn merge_overlay(target: &serde_json::Value, mut roster: serde_json::Value) -> s
     if target.is_null() {
         return roster;
     }
-    if let (Some(target_obj), Some(roster_obj)) =
-        (target.as_object(), roster.as_object_mut())
-    {
+    if let (Some(target_obj), Some(roster_obj)) = (target.as_object(), roster.as_object_mut()) {
         for (k, v) in target_obj {
             roster_obj.insert(k.clone(), v.clone());
         }
@@ -671,10 +665,7 @@ struct Subgraph<'a> {
     edges: Vec<GraphEdge<'a>>,
 }
 
-fn filter_catalog<'a>(
-    catalog: &'a RosterCatalog,
-    selected: &BTreeSet<ItemRef>,
-) -> Subgraph<'a> {
+fn filter_catalog<'a>(catalog: &'a RosterCatalog, selected: &BTreeSet<ItemRef>) -> Subgraph<'a> {
     let mut items: Vec<GraphItem<'a>> = catalog
         .iter_items()
         .filter(|(item_ref, _)| selected.contains(*item_ref))
@@ -698,12 +689,7 @@ fn filter_catalog<'a>(
             note: e.note.as_deref(),
         })
         .collect();
-    edges.sort_by(|a, b| {
-        a.from
-            .id
-            .cmp(&b.from.id)
-            .then(a.to.id.cmp(&b.to.id))
-    });
+    edges.sort_by(|a, b| a.from.id.cmp(&b.from.id).then(a.to.id.cmp(&b.to.id)));
 
     Subgraph { items, edges }
 }

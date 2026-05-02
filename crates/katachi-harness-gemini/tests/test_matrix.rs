@@ -155,8 +155,7 @@ fn resolve_roster(
     );
     let storage = default_storage();
     let modules: Vec<&dyn HarnessModule> = vec![&harness];
-    let inputs =
-        ResolveInputs::new(&req, &def, &modules, &kcfg, &storage, &fx.cwd);
+    let inputs = ResolveInputs::new(&req, &def, &modules, &kcfg, &storage, &fx.cwd);
     let out = resolve(inputs).unwrap();
     (def, out)
 }
@@ -258,16 +257,8 @@ fn settings_wins_over_extension_mcp_same_name() {
 
     // Also verify both mcp items coexist in the catalog, differentiated
     // by scope-prefixed ids.
-    let ext_mcp = ItemRef::new(
-        HarnessKind::Gemini,
-        "mcp_server",
-        "ext:browser:chrome",
-    );
-    let settings_mcp = ItemRef::new(
-        HarnessKind::Gemini,
-        "mcp_server",
-        "settings:project:chrome",
-    );
+    let ext_mcp = ItemRef::new(HarnessKind::Gemini, "mcp_server", "ext:browser:chrome");
+    let settings_mcp = ItemRef::new(HarnessKind::Gemini, "mcp_server", "settings:project:chrome");
     assert!(cat.contains(&ext_mcp));
     assert!(cat.contains(&settings_mcp));
 }
@@ -301,13 +292,8 @@ extensions = ["anything"]
 [run_profile]
 backend = "cli"
 "#;
-    let (definition, out) = resolve_roster(
-        &fx,
-        roster,
-        ActionRequest::Execute {
-            prompt: "x".into(),
-        },
-    );
+    let (definition, out) =
+        resolve_roster(&fx, roster, ActionRequest::Execute { prompt: "x".into() });
 
     let mut validators: Vec<Arc<dyn Validator>> = default_validators();
     validators.extend(gemini_validators(policy));
@@ -353,13 +339,8 @@ subagents = ["explorer"]
 [run_profile]
 backend = "cli"
 "#;
-    let (definition, out) = resolve_roster(
-        &fx,
-        roster,
-        ActionRequest::Execute {
-            prompt: "x".into(),
-        },
-    );
+    let (definition, out) =
+        resolve_roster(&fx, roster, ActionRequest::Execute { prompt: "x".into() });
 
     let mut validators: Vec<Arc<dyn Validator>> = default_validators();
     validators.extend(gemini_validators(policy));
@@ -404,13 +385,8 @@ subagents = ["explorer"]
 [run_profile]
 backend = "cli"
 "#;
-    let (definition, out) = resolve_roster(
-        &fx,
-        roster,
-        ActionRequest::Execute {
-            prompt: "x".into(),
-        },
-    );
+    let (definition, out) =
+        resolve_roster(&fx, roster, ActionRequest::Execute { prompt: "x".into() });
     let mut validators: Vec<Arc<dyn Validator>> = default_validators();
     validators.extend(gemini_validators(policy));
     let diags = run_validators(
@@ -446,19 +422,11 @@ extensions = ["workspace-a11y"]
 [run_profile]
 backend = "sdk-ts"
 "#;
-    let (_def, out) = resolve_roster(
-        &fx,
-        roster,
-        ActionRequest::Execute {
-            prompt: "x".into(),
-        },
-    );
+    let (_def, out) = resolve_roster(&fx, roster, ActionRequest::Execute { prompt: "x".into() });
     let harness = GeminiHarness::new();
     let req = InvocationRequest::new(
         "t",
-        ActionRequest::Execute {
-            prompt: "x".into(),
-        },
+        ActionRequest::Execute { prompt: "x".into() },
         fx.cwd.clone(),
     );
     let err = harness
@@ -508,10 +476,7 @@ fn stream_json_unknown_event_preserves_raw_payload() {
 fn resolver_closes_extension_into_skill_via_packaging() {
     let fx = Fixture::with(|root| {
         let ext = root.join("home/extensions/pkg");
-        write(
-            &ext.join("gemini-extension.json"),
-            r#"{"name": "pkg"}"#,
-        );
+        write(&ext.join("gemini-extension.json"), r#"{"name": "pkg"}"#);
         write(
             &ext.join("skills/audit.md"),
             "---\ndescription: audit\n---\n",
@@ -528,13 +493,7 @@ backend = "cli"
 [resolution]
 include_transitive = true
 "#;
-    let (_def, out) = resolve_roster(
-        &fx,
-        roster,
-        ActionRequest::Execute {
-            prompt: "x".into(),
-        },
-    );
+    let (_def, out) = resolve_roster(&fx, roster, ActionRequest::Execute { prompt: "x".into() });
     let ids: Vec<&str> = out
         .resolved
         .selected_items

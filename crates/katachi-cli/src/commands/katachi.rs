@@ -176,8 +176,7 @@ fn run_validate(global: &GlobalArgs, id: &str) -> Result<ExitCode> {
         .filter_map(|b| b.parse::<BackendKind>().ok())
         .collect();
 
-    let inputs =
-        ResolveInputs::new(&request, def, &modules, &load.config, &storage, &cwd);
+    let inputs = ResolveInputs::new(&request, def, &modules, &load.config, &storage, &cwd);
     let output = match resolve(inputs) {
         Ok(out) => out,
         Err(err) => {
@@ -205,7 +204,10 @@ fn run_validate(global: &GlobalArgs, id: &str) -> Result<ExitCode> {
         println!();
     } else {
         println!("katachi: {}", def.id);
-        println!("harness: {} (backend: {})", output.resolved.harness, output.resolved.backend);
+        println!(
+            "harness: {} (backend: {})",
+            output.resolved.harness, output.resolved.backend
+        );
         let total = output.resolved.diagnostics.len() + validator_diags.len();
         if total == 0 {
             println!("ok");

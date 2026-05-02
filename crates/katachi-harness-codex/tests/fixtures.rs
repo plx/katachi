@@ -65,14 +65,8 @@ impl Fx {
 #[test]
 fn trusted_vs_untrusted_project_behaviour() {
     let fx = Fx::new();
-    fx.write(
-        "home/config.toml",
-        r#"model = "gpt-5.4""#,
-    );
-    fx.write(
-        "project/.codex/config.toml",
-        r#"approval_policy = "never""#,
-    );
+    fx.write("home/config.toml", r#"model = "gpt-5.4""#);
+    fx.write("project/.codex/config.toml", r#"approval_policy = "never""#);
 
     // Case 1: trust required -> project layer is discovered but inactive.
     let mut settings = fx.settings();
@@ -112,28 +106,14 @@ fn trusted_vs_untrusted_project_behaviour() {
 fn nested_project_configs_stack_root_to_cwd() {
     let fx = Fx::new();
     let project = fx.join("project");
-    fx.write(
-        "project/.codex/config.toml",
-        r#"model = "root""#,
-    );
-    fx.write(
-        "project/a/.codex/config.toml",
-        r#"model = "a""#,
-    );
-    fx.write(
-        "project/a/b/.codex/config.toml",
-        r#"model = "b""#,
-    );
+    fx.write("project/.codex/config.toml", r#"model = "root""#);
+    fx.write("project/a/.codex/config.toml", r#"model = "a""#);
+    fx.write("project/a/b/.codex/config.toml", r#"model = "b""#);
 
     let settings = fx.settings();
     let cwd = project.join("a/b");
     let mut diags = Vec::new();
-    let layers = discover_config_layers(
-        &settings,
-        &[project.clone()],
-        &cwd,
-        &mut diags,
-    );
+    let layers = discover_config_layers(&settings, &[project.clone()], &cwd, &mut diags);
     let project_layers: Vec<_> = layers
         .iter()
         .filter(|l| l.source == ConfigSource::Project)
@@ -176,10 +156,7 @@ fn layered_agents_md_preserved_in_order() {
     fx.write("home/AGENTS.md", "global\n");
     fx.write("project/AGENTS.md", "project-root\n");
     fx.write("project/sub/AGENTS.md", "project-sub\n");
-    fx.write(
-        "project/.codex/config.toml",
-        r#"model = "gpt-5.4""#,
-    );
+    fx.write("project/.codex/config.toml", r#"model = "gpt-5.4""#);
 
     let settings = fx.settings();
     let roots = resolve_project_roots(&settings.project_roots, &fx.join("project"));
@@ -312,16 +289,20 @@ forbid_approval_policies = ["never"]
         only_active: true,
     });
     let diags = legality::validate_requirements(&eff);
-    assert!(diags.iter().any(|d| d.code == "codex.legality.requirements"
-        && d.severity == Severity::Error));
+    assert!(diags
+        .iter()
+        .any(|d| d.code == "codex.legality.requirements" && d.severity == Severity::Error));
 }
 
 #[test]
 fn plugin_packaging_discovered_with_edges() {
     let fx = Fx::new();
-    fx.write("market/accessibility/plugin.toml", r#"id = "accessibility"
+    fx.write(
+        "market/accessibility/plugin.toml",
+        r#"id = "accessibility"
 name = "Accessibility"
-"#);
+"#,
+    );
     fx.write("market/accessibility/skills/axe/SKILL.md", "axe skill\n");
     fx.write(
         "market/accessibility/agents/reviewer/agent.toml",
@@ -347,10 +328,7 @@ name = "Accessibility"
 #[test]
 fn missing_mcp_requirement_is_blocking() {
     let fx = Fx::new();
-    fx.write(
-        "home/config.toml",
-        r#"model = "gpt-5.4""#,
-    );
+    fx.write("home/config.toml", r#"model = "gpt-5.4""#);
     fx.write(
         ".codex/skills/axe/SKILL.md",
         r#"---
@@ -361,12 +339,7 @@ mcp_requirements: [does-not-exist]
 
     let settings = fx.settings();
     let mut diags = Vec::new();
-    let layers = discover_config_layers(
-        &settings,
-        &[fx.root.clone()],
-        &fx.root,
-        &mut diags,
-    );
+    let layers = discover_config_layers(&settings, &[fx.root.clone()], &fx.root, &mut diags);
     let skills = discover_skills(&settings, &[fx.root.clone()], &mut diags);
     let mcps = discover_mcp_servers(&layers, &mut diags);
     let eff = build_effective(BuildEffective {
@@ -392,12 +365,7 @@ fn backend_projection_sdk_py_disabled_blocks() {
     fx.write("home/config.toml", "model = \"gpt\"");
     let settings = fx.settings(); // enable_python_sdk = false
     let mut diags = Vec::new();
-    let layers = discover_config_layers(
-        &settings,
-        &[fx.root.clone()],
-        &fx.root,
-        &mut diags,
-    );
+    let layers = discover_config_layers(&settings, &[fx.root.clone()], &fx.root, &mut diags);
     let eff = build_effective(BuildEffective {
         layers: &layers,
         instructions: &[],
@@ -439,10 +407,7 @@ mcp_requirements: [chrome]
 ---
 "#,
     );
-    fx.write(
-        ".codex/agents/reviewer/agent.toml",
-        r#"model = "gpt""#,
-    );
+    fx.write(".codex/agents/reviewer/agent.toml", r#"model = "gpt""#);
 
     let settings = fx.settings();
     let catalog = discover(&DiscoveryInputs {

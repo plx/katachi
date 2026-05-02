@@ -93,10 +93,17 @@ impl ClaudeConfig {
             .get("default_setting_sources")
             .and_then(|v| v.as_array())
         {
-            out.default_setting_sources =
-                v.iter().filter_map(|x| x.as_str()).map(str::to_string).collect();
+            out.default_setting_sources = v
+                .iter()
+                .filter_map(|x| x.as_str())
+                .map(str::to_string)
+                .collect();
         }
-        if let Some(v) = h.extra.get("prefer_materialized_cli").and_then(|v| v.as_bool()) {
+        if let Some(v) = h
+            .extra
+            .get("prefer_materialized_cli")
+            .and_then(|v| v.as_bool())
+        {
             out.prefer_materialized_cli = v;
         }
         if let Some(v) = h

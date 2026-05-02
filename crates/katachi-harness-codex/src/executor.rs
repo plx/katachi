@@ -56,9 +56,8 @@ pub fn run(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> 
 fn materialize_overlay(
     ctx: &ExecuteContext<'_>,
 ) -> Result<(TempOverlay, ExecutionPlan), ExecutionError> {
-    let mut overlay = TempOverlay::with_prefix("katachi-codex-").map_err(|source| {
-        ExecutionError::Io { source }
-    })?;
+    let mut overlay = TempOverlay::with_prefix("katachi-codex-")
+        .map_err(|source| ExecutionError::Io { source })?;
 
     for file in &ctx.plan.materialization.files {
         write_file(&mut overlay, file)?;
@@ -265,9 +264,7 @@ mod tests {
 
         let request = InvocationRequest::new(
             "k",
-            ActionRequest::Execute {
-                prompt: "p".into(),
-            },
+            ActionRequest::Execute { prompt: "p".into() },
             Utf8PathBuf::from("/tmp"),
         );
         let rec = run(&ExecuteContext {

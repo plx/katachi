@@ -106,7 +106,7 @@ fn write_record(dir: &Path, run_id: &str, outcome: &str) {
 }
 
 fn write_transcript(dir: &Path) {
-    let body = "{\"seq\":0,\"timestamp\":\"2026-04-01T00:00:00Z\",\"kind\":{\"stdout_text\":{\"text\":\"hi\\n\"}}}\n{\"seq\":1,\"timestamp\":\"2026-04-01T00:00:00Z\",\"kind\":{\"stderr_text\":{\"text\":\"warn\\n\"}}}\n";
+    let body = "{\"seq\":0,\"ts\":\"2026-04-01T00:00:00Z\",\"kind\":\"stdout_text\",\"text\":\"hi\\n\"}\n{\"seq\":1,\"ts\":\"2026-04-01T00:00:00Z\",\"kind\":\"stderr_text\",\"text\":\"warn\\n\"}\n";
     fs::write(dir.join("transcript.jsonl"), body).unwrap();
 }
 
@@ -114,7 +114,11 @@ fn write_transcript(dir: &Path) {
 fn run_list_empty() {
     let fx = Fx::new();
     let out = fx.run(&["run", "list"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("(no runs)"), "stdout: {stdout}");
 }
@@ -131,7 +135,11 @@ fn run_list_includes_committed_and_partial() {
     write_transcript(&dir1);
 
     let out = fx.run(&["--json", "run", "list"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let runs = v["runs"].as_array().unwrap();
@@ -148,7 +156,11 @@ fn run_show_committed_returns_record_summary() {
     let dir = fx.fake_run_dir(id, false);
     write_record(&dir, id, "success");
     let out = fx.run(&["--json", "run", "show", id]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["state"], "committed");
@@ -170,18 +182,53 @@ fn run_transcript_emits_parsed_events_in_json() {
     write_record(&dir, id, "success");
     write_transcript(&dir);
     let out = fx.run(&["--json", "run", "transcript", id]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     let events = v["events"].as_array().unwrap();
     assert_eq!(events.len(), 2);
+    assert_eq!(v["state"], "committed");
+    assert_eq!(events[0]["kind"], "stdout_text");
+    assert_eq!(events[0]["ts"], "2026-04-01T00:00:00Z");
+}
+
+#[test]
+fn run_transcript_human_uses_flat_event_schema_and_keeps_later_events() {
+    let fx = Fx::new();
+    let id = "01900000-0000-7000-8000-000000000014";
+    let dir = fx.fake_run_dir(id, false);
+    write_record(&dir, id, "success");
+    fs::write(
+        dir.join("transcript.jsonl"),
+        "not json\n{\"seq\":2,\"ts\":\"2026-04-01T00:00:02Z\",\"kind\":\"assistant_message\",\"text\":\"hello\"}\n",
+    )
+    .unwrap();
+
+    let out = fx.run(&["run", "transcript", id]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("2026-04-01T00:00:02Z"), "stdout: {stdout}");
+    assert!(stdout.contains("assistant_message"), "stdout: {stdout}");
+    assert!(stdout.contains("line 1:"), "stdout: {stdout}");
 }
 
 #[test]
 fn katachi_list_empty_when_no_definitions() {
     let fx = Fx::new();
     let out = fx.run(&["katachi", "list"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("(no katachis)"));
 }
@@ -206,7 +253,11 @@ harness = "codex"
 "#,
     );
     let out = fx.run(&["--json", "katachi", "list"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     let katachis = v["katachis"].as_array().unwrap();
@@ -227,7 +278,11 @@ harness = "claude"
 "#,
     );
     let out = fx.run(&["--json", "katachi", "show", "demo"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["id"], "demo");

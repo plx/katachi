@@ -33,20 +33,16 @@ pub fn scan_loose_agents(
     Ok(())
 }
 
-fn discover_in_dir(
-    state: &mut ScanState,
-    dir: &ClaudeDir,
-) -> Result<(), ClaudeDiscoveryError> {
+fn discover_in_dir(state: &mut ScanState, dir: &ClaudeDir) -> Result<(), ClaudeDiscoveryError> {
     let agents_dir = dir.agents_dir();
     if !agents_dir.exists() {
         return Ok(());
     }
-    let read = std::fs::read_dir(agents_dir.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let read =
+        std::fs::read_dir(agents_dir.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: agents_dir.clone(),
             source,
-        }
-    })?;
+        })?;
     let mut files: Vec<camino::Utf8PathBuf> = Vec::new();
     for entry in read {
         let entry = entry.map_err(|source| ClaudeDiscoveryError::Io {
@@ -127,12 +123,11 @@ fn parse_agent_file(
     path: &Utf8Path,
     scope: ClaudeScope,
 ) -> Result<Option<(DiscoveredItem, Vec<AgentPending>)>, ClaudeDiscoveryError> {
-    let source = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let source =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
+        })?;
     let doc = frontmatter::parse(path, &source)?;
 
     let stem = path

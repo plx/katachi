@@ -113,11 +113,7 @@ impl Validator for GeminiPreviewValidator {
                 continue;
             }
             if let Some(node) = ctx.catalog.get(&item.item) {
-                if node
-                    .capabilities
-                    .iter()
-                    .any(|c| c == "preview-required")
-                {
+                if node.capabilities.iter().any(|c| c == "preview-required") {
                     diags.push(
                         Diagnostic::error(
                             "gemini.preview.required",
@@ -156,8 +152,7 @@ impl Validator for GeminiMcpConflictValidator {
                 .filter(|e| e.kind == EdgeKind::Projection)
                 .collect();
             if !overrides.is_empty() {
-                let shadows: Vec<String> =
-                    overrides.iter().map(|e| e.to.to_string()).collect();
+                let shadows: Vec<String> = overrides.iter().map(|e| e.to.to_string()).collect();
                 diags.push(
                     Diagnostic::warning(
                         "gemini.mcp-conflict.settings-wins",
@@ -200,7 +195,9 @@ impl Validator for GeminiSdkProjectionValidator {
         }
         for item in &ctx.resolved.selected_items {
             let unsupported = match item.item.kind.as_str() {
-                "extension" | "subagent" | "hook_set" | "policy_set" => Some(item.item.kind.as_str()),
+                "extension" | "subagent" | "hook_set" | "policy_set" => {
+                    Some(item.item.kind.as_str())
+                }
                 _ => None,
             };
             if let Some(kind) = unsupported {
@@ -300,7 +297,9 @@ harness = "gemini"
             catalog: &cat,
             definition: &def(),
         });
-        assert!(out.iter().any(|d| d.code == "gemini.policy.extensions-disabled"));
+        assert!(out
+            .iter()
+            .any(|d| d.code == "gemini.policy.extensions-disabled"));
     }
 
     #[test]
@@ -316,7 +315,9 @@ harness = "gemini"
             catalog: &cat,
             definition: &def(),
         });
-        assert!(out.iter().any(|d| d.code == "gemini.policy.extension-not-allowed"));
+        assert!(out
+            .iter()
+            .any(|d| d.code == "gemini.policy.extension-not-allowed"));
     }
 
     #[test]
@@ -326,7 +327,8 @@ harness = "gemini"
         let v = GeminiPolicyValidator::new(policy);
         let res = resolved(vec![pick("mcp_server", "ext:foo:chrome")]);
         let mut cat = RosterCatalog::empty(HarnessKind::Gemini);
-        cat.insert_item(item("mcp_server", "ext:foo:chrome", vec![])).unwrap();
+        cat.insert_item(item("mcp_server", "ext:foo:chrome", vec![]))
+            .unwrap();
         let out = v.validate(&ValidateContext {
             resolved: &res,
             catalog: &cat,
@@ -414,6 +416,8 @@ harness = "gemini"
             catalog: &cat,
             definition: &def(),
         });
-        assert!(out.iter().any(|d| d.code == "gemini.projection.sdk-ts-unsupported"));
+        assert!(out
+            .iter()
+            .any(|d| d.code == "gemini.projection.sdk-ts-unsupported"));
     }
 }

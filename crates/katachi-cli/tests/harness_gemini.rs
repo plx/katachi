@@ -154,8 +154,7 @@ fn scan_discovers_extension() {
     let items = v["items"].as_array().unwrap();
     assert!(items
         .iter()
-        .any(|i| i["item_ref"]["kind"] == "extension"
-            && i["item_ref"]["id"] == "workspace-a11y"));
+        .any(|i| i["item_ref"]["kind"] == "extension" && i["item_ref"]["id"] == "workspace-a11y"));
 }
 
 #[test]
@@ -194,7 +193,10 @@ binary = "fake-gemini"
     let out = gx.run(&["harness", "gemini", "plan", "demo", "execute", "hello"]);
     expect_status(&out, 0);
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("fake-gemini"), "stdout should include fake binary: {stdout}");
+    assert!(
+        stdout.contains("fake-gemini"),
+        "stdout should include fake binary: {stdout}"
+    );
     assert!(stdout.contains("--output-format"));
     assert!(stdout.contains("stream-json"));
     assert!(stdout.contains("--model"));
@@ -392,10 +394,7 @@ backend = "sdk-ts"
 #[test]
 fn graph_renders_text_format() {
     let gx = Gx::new();
-    gx.write_extension(
-        "workspace-a11y",
-        r#"{"name": "workspace-a11y"}"#,
-    );
+    gx.write_extension("workspace-a11y", r#"{"name": "workspace-a11y"}"#);
     let out = gx.run(&["harness", "gemini", "graph", "--format", "text"]);
     expect_status(&out, 0);
     let stdout = String::from_utf8(out.stdout).unwrap();

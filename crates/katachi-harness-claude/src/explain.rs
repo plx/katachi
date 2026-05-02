@@ -88,8 +88,12 @@ pub fn explain(ctx: &ExplainContext<'_>) -> Result<ExplainResult, ResolveError> 
     }
 
     let summary = if item.display_name.trim() == ctx.item.id
-        || item.display_name.starts_with(&format!("{} — ", ctx.item.id))
-        || item.display_name.starts_with(&format!("{} - ", ctx.item.id))
+        || item
+            .display_name
+            .starts_with(&format!("{} — ", ctx.item.id))
+        || item
+            .display_name
+            .starts_with(&format!("{} - ", ctx.item.id))
     {
         format!("{} (kind={})", item.display_name, ctx.item.kind)
     } else {

@@ -201,10 +201,7 @@ sandbox_mode = "read-only"
         .unwrap();
 
         let _ = fake_path;
-        Self {
-            _td: td,
-            workdir,
-        }
+        Self { _td: td, workdir }
     }
 
     fn config_path(&self) -> PathBuf {
@@ -428,14 +425,7 @@ fn codex_dry_run_does_not_invoke_fake_binary() {
 fn claude_dry_run_does_not_invoke_fake_binary_or_create_a_run() {
     let fx = ClaudeFx::new(false);
 
-    let out = fx.run(&[
-        "--dry-run",
-        "harness",
-        "claude",
-        "execute",
-        "greet",
-        "hi",
-    ]);
+    let out = fx.run(&["--dry-run", "harness", "claude", "execute", "greet", "hi"]);
     assert!(
         out.status.success(),
         "expected dry-run success; stderr:\n{}",
@@ -567,6 +557,47 @@ fn claude_failed_execute_leaves_partial_directory() {
     );
 }
 
+#[test]
+fn manifest_write_failure_keeps_successful_run_partial() {
+    let fx = CodexFx::new(false);
+    fx.write_roster("audit", CODEX_AUDIT_ROSTER);
+    let fake = fx.workdir.join("fake-codex.sh");
+    fs::write(
+        &fake,
+        r#"#!/bin/sh
+for d in "$KATACHI_DATA"/runs/*.partial; do
+  [ -d "$d" ] && mkdir "$d/manifest.json"
+done
+exit 0
+"#,
+    )
+    .unwrap();
+    make_executable(&fake);
+
+    let out = fx.run(&["harness", "codex", "execute", "audit", "hi"]);
+    assert_eq!(
+        out.status.code(),
+        Some(7),
+        "manifest failure must map to ExitCode::Execute; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let runs_dir = fx.data_root().join("runs");
+    let dirs = list_run_dirs(&runs_dir);
+    let partials: Vec<_> = dirs
+        .iter()
+        .filter(|p| p.to_string_lossy().ends_with(".partial"))
+        .collect();
+    assert_eq!(partials.len(), 1, "expected one partial dir; got {dirs:?}");
+    assert!(partials[0].join("manifest.json").is_dir());
+    assert!(
+        dirs.iter()
+            .all(|p| p.to_string_lossy().ends_with(".partial")),
+        "manifest failure must not commit a final run dir: {dirs:?}"
+    );
+}
+
 // =================================================================
 // Policy 4: materialization precedence
 // =================================================================
@@ -654,6 +685,60 @@ harness = "claude"
     );
 }
 
+#[test]
+fn duplicate_claude_roster_ids_are_rejected() {
+    let fx = ClaudeFx::new(false);
+    write(
+        &fx.root,
+        "data/rosters/claude/also-greet.toml",
+        r#"
+version = 1
+id = "greet"
+
+[selection]
+skills = ["greeter"]
+"#,
+    );
+
+    let out = fx.run(&["harness", "claude", "plan", "greet", "execute", "hi"]);
+    assert_eq!(out.status.code(), Some(3));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.contains("duplicate claude roster id `greet`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn duplicate_codex_roster_ids_are_rejected() {
+    let fx = CodexFx::new(false);
+    fx.write_roster("audit", CODEX_AUDIT_ROSTER);
+    fx.write_roster("audit-copy", CODEX_AUDIT_ROSTER);
+
+    let out = fx.run(&["harness", "codex", "plan", "audit", "execute", "hi"]);
+    assert_eq!(out.status.code(), Some(3));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.contains("duplicate codex roster id `audit`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn duplicate_gemini_roster_ids_are_rejected() {
+    let fx = GeminiFx::new(false);
+    fx.write_roster("demo", GEMINI_DEMO_ROSTER);
+    fx.write_roster("demo-copy", GEMINI_DEMO_ROSTER);
+
+    let out = fx.run(&["harness", "gemini", "plan", "demo", "execute", "hi"]);
+    assert_eq!(out.status.code(), Some(3));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.contains("duplicate gemini roster id `demo`"),
+        "{stderr}"
+    );
+}
+
 // =================================================================
 // Policy 7: stubbed JSON behavior
 // =================================================================
@@ -691,7 +776,9 @@ respect_project_trust = false
         .env("KATACHI_DATA", &data_root)
         .env("KATACHI_CACHE", data_root.join("cache"))
         .env("KATACHI_CONFIG", &config_path)
-        .args(["--json", "harness", "codex", "project", "anything", "--sdk", "ts"]);
+        .args([
+            "--json", "harness", "codex", "project", "anything", "--sdk", "ts",
+        ]);
     let out = cmd.output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -700,9 +787,7 @@ respect_project_trust = false
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8(out.stdout).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
-        panic!("--json output must be valid JSON; err={err}; got: {stdout}")
-    });
+    let v: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("--json output must be valid JSON; err={err}; got: {stdout}"));
     assert_eq!(v["error"]["kind"], "not_implemented");
 }
-

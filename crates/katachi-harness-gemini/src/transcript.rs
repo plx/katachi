@@ -57,7 +57,10 @@ pub fn project_event(value: &Value) -> Vec<EventKind> {
                     _ => None,
                 })
                 .unwrap_or_default();
-            let role = value.get("role").and_then(|v| v.as_str()).unwrap_or("assistant");
+            let role = value
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("assistant");
             if role == "user" {
                 vec![EventKind::UserMessage { text }]
             } else {
@@ -199,8 +202,7 @@ mod tests {
 
     #[test]
     fn error_event_maps_to_warning() {
-        let events =
-            parse_line(r#"{"type": "error", "code": "boom", "message": "nope"}"#);
+        let events = parse_line(r#"{"type": "error", "code": "boom", "message": "nope"}"#);
         match &events[0] {
             EventKind::Warning { code, message } => {
                 assert_eq!(code, "boom");
@@ -212,8 +214,7 @@ mod tests {
 
     #[test]
     fn result_event_final() {
-        let events =
-            parse_line(r#"{"type": "result", "summary": "done", "outcome": "success"}"#);
+        let events = parse_line(r#"{"type": "result", "summary": "done", "outcome": "success"}"#);
         match &events[0] {
             EventKind::Result { summary, outcome } => {
                 assert_eq!(summary, "done");

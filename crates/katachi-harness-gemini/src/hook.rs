@@ -112,7 +112,11 @@ pub fn to_discovered_item(h: &HookSet) -> DiscoveredItem {
         HookOwner::Settings { .. } => None,
     };
     DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Gemini, GeminiItemKind::HookSet.as_str(), h.id.clone()),
+        item_ref: ItemRef::new(
+            HarnessKind::Gemini,
+            GeminiItemKind::HookSet.as_str(),
+            h.id.clone(),
+        ),
         display_name: h.id.clone(),
         source: ItemSource {
             path: Some(h.path.clone()),

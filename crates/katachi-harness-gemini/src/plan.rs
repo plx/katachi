@@ -344,7 +344,11 @@ fn build_sdk_ts_plan(
     let binary = binary_name_from_overlay(&ctx.resolved.run_profile.extras);
     // Use a configurable wrapper binary (defaults to `node`) so tests
     // can point at a fake entrypoint.
-    let argv0 = if binary == "gemini" { "node".to_owned() } else { binary.clone() };
+    let argv0 = if binary == "gemini" {
+        "node".to_owned()
+    } else {
+        binary.clone()
+    };
     let argv = vec![
         argv0,
         "-e".into(),
@@ -372,9 +376,7 @@ fn build_sdk_ts_plan(
     })
 }
 
-fn materialization_plan(
-    mode: katachi_core::model::MaterializationMode,
-) -> MaterializationPlan {
+fn materialization_plan(mode: katachi_core::model::MaterializationMode) -> MaterializationPlan {
     use katachi_core::model::MaterializationMode as MM;
     match mode {
         MM::Ambient => MaterializationPlan::ambient(),
@@ -430,11 +432,7 @@ mod tests {
     use katachi_core::record::RunId;
     use serde_json::json;
 
-    fn resolved(
-        backend: BackendKind,
-        items: Vec<&str>,
-        extras: Value,
-    ) -> ResolvedKatachi {
+    fn resolved(backend: BackendKind, items: Vec<&str>, extras: Value) -> ResolvedKatachi {
         let selected_items = items
             .into_iter()
             .map(|s| {
@@ -486,16 +484,16 @@ mod tests {
         };
         let plan = build_plan(&ctx).unwrap();
         assert_eq!(plan.backend, BackendKind::Cli);
-        assert!(plan
-            .execution
-            .argv
-            .iter()
-            .any(|a| a == "--output-format"));
+        assert!(plan.execution.argv.iter().any(|a| a == "--output-format"));
         assert!(plan.execution.argv.iter().any(|a| a == "stream-json"));
         assert!(plan.execution.argv.iter().any(|a| a == "--approval-mode"));
         assert!(plan.execution.argv.iter().any(|a| a == "plan"));
         assert!(plan.execution.argv.iter().any(|a| a == "--model"));
-        assert!(plan.execution.argv.iter().any(|a| a == "gemini-3-pro-preview"));
+        assert!(plan
+            .execution
+            .argv
+            .iter()
+            .any(|a| a == "gemini-3-pro-preview"));
         // `--extension workspace-a11y`
         let pos = plan
             .execution

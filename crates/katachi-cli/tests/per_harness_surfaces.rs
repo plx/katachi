@@ -113,7 +113,11 @@ project_roots = ["."]
 fn claude_effective_config_emits_argv_and_backend() {
     let fx = ClaudeFx::new();
     let out = fx.run(&["--json", "harness", "claude", "effective-config", "greet"]);
-    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["roster"], "greet");
@@ -125,7 +129,11 @@ fn claude_effective_config_emits_argv_and_backend() {
 fn claude_dump_settings_lists_overlay_files() {
     let fx = ClaudeFx::new();
     let out = fx.run(&["--json", "harness", "claude", "dump-settings", "greet"]);
-    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["roster"], "greet");
@@ -220,7 +228,11 @@ output_mode = "machine-readable"
 fn codex_dump_roster_emits_summary_and_resolved_items() {
     let fx = CodexFx::new();
     let out = fx.run(&["--json", "harness", "codex", "dump-roster", "audit"]);
-    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["roster"]["id"], "audit");
@@ -230,7 +242,11 @@ fn codex_dump_roster_emits_summary_and_resolved_items() {
 fn codex_dump_settings_emits_layer_order() {
     let fx = CodexFx::new();
     let out = fx.run(&["--json", "harness", "codex", "dump-settings", "audit"]);
-    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["roster"], "audit");
@@ -368,7 +384,11 @@ binary = "fake-gemini"
 fn gemini_dump_roster_emits_projection() {
     let fx = GeminiFx::new();
     let out = fx.run(&["--json", "harness", "gemini", "dump-roster", "demo"]);
-    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["roster"]["id"], "demo");
@@ -379,7 +399,11 @@ fn gemini_dump_roster_emits_projection() {
 fn gemini_effective_config_emits_argv() {
     let fx = GeminiFx::new();
     let out = fx.run(&["--json", "harness", "gemini", "effective-config", "demo"]);
-    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["roster"], "demo");

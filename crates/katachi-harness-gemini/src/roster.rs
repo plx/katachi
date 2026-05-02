@@ -389,10 +389,7 @@ require_preview_features = true
         let r = GeminiRoster::from_toml_str(ACCESSIBILITY_ROSTER).unwrap();
         assert_eq!(r.id, "accessibility-auditor");
         assert_eq!(r.selection.extensions, vec!["workspace-a11y"]);
-        assert_eq!(
-            r.run_profile.model.as_deref(),
-            Some("gemini-3-pro-preview")
-        );
+        assert_eq!(r.run_profile.model.as_deref(), Some("gemini-3-pro-preview"));
         assert!(r.resolution.require_preview_features);
     }
 
@@ -400,7 +397,10 @@ require_preview_features = true
     fn selection_to_selector_set_includes_extension_kind() {
         let r = GeminiRoster::from_toml_str(ACCESSIBILITY_ROSTER).unwrap();
         let sel = r.selection.to_selector_set(true);
-        let found = sel.selectors.iter().any(|s| matches!(s, Selector::ExplicitIds { kind, .. } if kind == "extension"));
+        let found = sel
+            .selectors
+            .iter()
+            .any(|s| matches!(s, Selector::ExplicitIds { kind, .. } if kind == "extension"));
         assert!(found);
         assert!(sel.include_packaging_closure);
     }
@@ -436,9 +436,7 @@ require_preview_features = true
                 _ => None,
             })
             .collect();
-        assert!(refs
-            .iter()
-            .any(|r| r.id == "context:project:GEMINI.md"));
+        assert!(refs.iter().any(|r| r.id == "context:project:GEMINI.md"));
         assert!(refs
             .iter()
             .any(|r| r.id == "context:extension:workspace-a11y:GEMINI.md"));

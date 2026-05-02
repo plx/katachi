@@ -147,7 +147,10 @@ fn have_plan_execute_renders_plan_for_claude_roster() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("--print"), "plan should include claude argv: {stdout}");
+    assert!(
+        stdout.contains("--print"),
+        "plan should include claude argv: {stdout}"
+    );
     assert!(stdout.contains("hi"));
 }
 

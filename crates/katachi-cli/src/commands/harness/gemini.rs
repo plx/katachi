@@ -13,8 +13,12 @@ use katachi_core::harness::{
     ExplainContext, ExplainResult, HarnessModule, PlanContext, RosterCatalog, ScanContext,
 };
 use katachi_core::katachi::KatachiDefinition;
+use katachi_core::materialize::{KeepPolicy, TempOverlay};
 use katachi_core::model::{BackendKind, HarnessKind, ItemRef, MaterializationMode as CoreMatMode};
-use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides, StoragePaths};
+use katachi_core::paths::{
+    resolve_config_file, resolve_storage_paths, PathOverrides, StoragePaths,
+};
+use katachi_core::persist::{finalize_run_directory, CommitPolicy};
 use katachi_core::plan::{ActionRequest, InvocationRequest, PLAN_SCHEMA_VERSION};
 use katachi_core::record::RunId;
 use katachi_core::resolve::{resolve, ResolveInputs};
@@ -28,11 +32,8 @@ use katachi_harness_gemini::roster::{GeminiRoster, GeminiRosterStore};
 use katachi_harness_gemini::scan;
 use katachi_harness_gemini::validate::gemini_validators;
 use katachi_harness_gemini::GeminiHarness;
-use katachi_core::materialize::{KeepPolicy, TempOverlay};
 
-use crate::cli::{
-    GlobalArgs, GraphFormat, HarnessAction, HarnessPlanAction, MaterializationArg,
-};
+use crate::cli::{GlobalArgs, GraphFormat, HarnessAction, HarnessPlanAction, MaterializationArg};
 use crate::exit::ExitCode;
 
 /// Dispatch an action on the gemini harness.
@@ -43,8 +44,7 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
         HarnessAction::Graph { format } => run_graph(global, format),
         HarnessAction::Plan {
             roster_id,
-            what:
-                HarnessPlanAction::Execute { prompt },
+            what: HarnessPlanAction::Execute { prompt },
         } => run_plan(global, &roster_id, &prompt),
         HarnessAction::Execute { roster_id, prompt } => run_execute(global, &roster_id, &prompt),
         HarnessAction::Doctor => run_doctor(global),
@@ -54,9 +54,7 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
             global.json,
             "harness gemini project",
         )),
-        HarnessAction::EffectiveConfig { roster_id } => {
-            run_effective_config(global, &roster_id)
-        }
+        HarnessAction::EffectiveConfig { roster_id } => run_effective_config(global, &roster_id),
     }
 }
 
@@ -195,7 +193,10 @@ fn render_scan_human(catalog: &RosterCatalog) {
     println!();
     let mut by_kind: BTreeMap<&str, Vec<&ItemRef>> = BTreeMap::new();
     for (item_ref, _) in catalog.iter_items() {
-        by_kind.entry(item_ref.kind.as_str()).or_default().push(item_ref);
+        by_kind
+            .entry(item_ref.kind.as_str())
+            .or_default()
+            .push(item_ref);
     }
     for (kind, refs) in &by_kind {
         println!("[{kind}] ({})", refs.len());
@@ -269,7 +270,10 @@ fn parse_explain_ref(raw: &str, catalog: &RosterCatalog) -> Result<ItemRef> {
     match matches.len() {
         0 => Err(anyhow!("no item with id `{raw}`")),
         1 => Ok(matches[0].clone()),
-        _ => Err(anyhow!("id `{raw}` is ambiguous: {} matches", matches.len())),
+        _ => Err(anyhow!(
+            "id `{raw}` is ambiguous: {} matches",
+            matches.len()
+        )),
     }
 }
 
@@ -359,7 +363,14 @@ pub fn run_plan(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result<Ex
     let req = build_request_for_roster(global, &roster, ctx.cwd.clone(), prompt);
 
     let modules: Vec<&dyn HarnessModule> = vec![&harness];
-    let inputs = ResolveInputs::new(&req, &definition, &modules, &ctx.config, &ctx.storage, &ctx.cwd);
+    let inputs = ResolveInputs::new(
+        &req,
+        &definition,
+        &modules,
+        &ctx.config,
+        &ctx.storage,
+        &ctx.cwd,
+    );
     let out = match resolve(inputs) {
         Ok(o) => o,
         Err(e) => {
@@ -430,10 +441,7 @@ fn render_plan_human(report: &PlanReport<'_>) {
     println!("harness     : {}", report.resolved.harness);
     println!("backend     : {}", report.resolved.backend);
     println!("summary     : {}", report.plan.summary);
-    println!(
-        "schema      : plan v{}",
-        PLAN_SCHEMA_VERSION
-    );
+    println!("schema      : plan v{}", PLAN_SCHEMA_VERSION);
     println!();
     println!("argv:");
     for arg in &report.plan.execution.argv {
@@ -448,7 +456,10 @@ fn render_plan_human(report: &PlanReport<'_>) {
     }
     if !report.plan.materialization.files.is_empty() {
         println!();
-        println!("materialized files: {}", report.plan.materialization.files.len());
+        println!(
+            "materialized files: {}",
+            report.plan.materialization.files.len()
+        );
     }
     let all_diags: Vec<&Diagnostic> = report
         .resolved
@@ -487,7 +498,14 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
     let req = build_request_for_roster(global, &roster, ctx.cwd.clone(), prompt);
 
     let modules: Vec<&dyn HarnessModule> = vec![&harness];
-    let inputs = ResolveInputs::new(&req, &definition, &modules, &ctx.config, &ctx.storage, &ctx.cwd);
+    let inputs = ResolveInputs::new(
+        &req,
+        &definition,
+        &modules,
+        &ctx.config,
+        &ctx.storage,
+        &ctx.cwd,
+    );
     let out = match resolve(inputs) {
         Ok(o) => o,
         Err(e) => {
@@ -565,15 +583,13 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
 
     // Materialize before planning so the plan can point at the overlay.
     let (mut overlay_handle, overlay_manifest) = match req.materialization {
-        CoreMatMode::TempOverlay => {
-            match build_overlay(&ctx, &out.resolved, &out.catalog) {
-                Ok((ov, m)) => (Some(ov), Some(m)),
-                Err(e) => {
-                    eprintln!("katachi harness gemini: overlay failed: {e}");
-                    return Ok(ExitCode::Plan);
-                }
+        CoreMatMode::TempOverlay => match build_overlay(&ctx, &out.resolved, &out.catalog) {
+            Ok((ov, m)) => (Some(ov), Some(m)),
+            Err(e) => {
+                eprintln!("katachi harness gemini: overlay failed: {e}");
+                return Ok(ExitCode::Plan);
             }
-        }
+        },
         CoreMatMode::Ambient => (None, None),
     };
     let preserve_failed_overlays = GeminiConfig::from_katachi(&ctx.config)
@@ -624,25 +640,28 @@ fn run_after_overlay(
         }
     };
     // Keep plan_ctx name for parity with previous code path.
-    let _ = (&plan, harness, PlanContext {
-        request: req,
-        resolved,
-        run_id,
-    });
+    let _ = (
+        &plan,
+        harness,
+        PlanContext {
+            request: req,
+            resolved,
+            run_id,
+        },
+    );
 
     let runs_root_utf8 = ctx.storage.runs_dir();
     if let Err(e) = std::fs::create_dir_all(runs_root_utf8.as_std_path()) {
         eprintln!("katachi harness gemini: failed to create runs directory: {e}");
         return Ok(ExitCode::Config);
     }
-    let run_dir =
-        match katachi_core::persist::RunDirectory::create(&runs_root_utf8, plan.run_id) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("katachi harness gemini: {e}");
-                return Ok(ExitCode::Execute);
-            }
-        };
+    let run_dir = match katachi_core::persist::RunDirectory::create(&runs_root_utf8, plan.run_id) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("katachi harness gemini: {e}");
+            return Ok(ExitCode::Execute);
+        }
+    };
     if let Err(e) = run_dir.write_request(req) {
         eprintln!("katachi harness gemini: {e}");
         return Ok(ExitCode::Execute);
@@ -659,77 +678,71 @@ fn run_after_overlay(
         started_at: time::OffsetDateTime::now_utc(),
     };
 
-    let partial_path = run_dir.partial_path().to_owned();
     let record = match harness.execute(&exec_ctx) {
         Ok(r) => r,
         Err(e) => {
+            let finalized = finalize_run_directory(run_dir, None, CommitPolicy::SuccessOnly);
             eprintln!("katachi harness gemini: execute failed: {e}");
-            let _ = run_dir.write_manifest();
+            if let Some(err) = &finalized.manifest_error {
+                eprintln!("katachi harness gemini: writing run manifest: {err:#}");
+            }
             eprintln!(
                 "katachi harness gemini: partial preserved at `{}`",
-                partial_path
+                finalized.partial_path
             );
             return Ok(ExitCode::Execute);
         }
     };
-    let _ = run_dir.write_manifest();
-
-    let success = matches!(
-        record.result.outcome,
-        katachi_core::record::Outcome::Success | katachi_core::record::Outcome::Planned
+    let finalized = finalize_run_directory(
+        run_dir,
+        Some(record.result.outcome),
+        CommitPolicy::SuccessOnly,
     );
-    let final_path: Option<Utf8PathBuf> = if success {
-        match run_dir.commit() {
-            Ok(p) => Some(p),
-            Err(e) => {
-                eprintln!("katachi harness gemini: failed to commit run: {e}");
-                eprintln!(
-                    "katachi harness gemini: partial preserved at `{}`",
-                    partial_path
-                );
-                None
-            }
-        }
-    } else {
+    if let Some(err) = &finalized.manifest_error {
+        eprintln!("katachi harness gemini: writing run manifest: {err:#}");
+    }
+    if let Some(err) = &finalized.commit_error {
+        eprintln!("katachi harness gemini: failed to commit run: {err:#}");
+    }
+    if !finalized.is_committed() {
         eprintln!(
             "katachi harness gemini: partial preserved at `{}`",
-            partial_path
+            finalized.partial_path
         );
-        None
-    };
+    }
     if global.json {
         serde_json::to_writer_pretty(std::io::stdout(), &record)?;
         println!();
     } else {
         println!("run complete");
         println!("  run_id : {}", record.run_id);
-        match &final_path {
-            Some(p) => println!("  dir    : {}", p),
-            None => println!("  dir    : {} (partial)", partial_path),
-        }
+        println!("  dir    : {}", finalized.path);
+        println!(
+            "  state  : {}",
+            if finalized.is_committed() {
+                "committed"
+            } else {
+                "partial"
+            }
+        );
         println!("  outcome: {:?}", record.result.outcome);
         if let Some(code) = record.result.exit_code {
             println!("  exit   : {code}");
         }
     }
-    if success && final_path.is_none() {
+    if record.result.outcome == katachi_core::record::Outcome::Success && !finalized.is_committed()
+    {
         return Ok(ExitCode::Execute);
     }
     match record.result.outcome {
-        katachi_core::record::Outcome::Success | katachi_core::record::Outcome::Planned => {
-            Ok(ExitCode::Ok)
-        }
+        katachi_core::record::Outcome::Success => Ok(ExitCode::Ok),
         _ => Ok(ExitCode::Execute),
     }
 }
 
 fn load_rosters(ctx: &Ctx) -> Result<GeminiRosterStore> {
-    let dir = Utf8PathBuf::from_path_buf(rosters_dir(ctx)).map_err(|p| {
-        anyhow!(
-            "rosters directory `{}` is not valid UTF-8",
-            p.display()
-        )
-    })?;
+    let dir = Utf8PathBuf::from_path_buf(rosters_dir(ctx))
+        .map_err(|p| anyhow!("rosters directory `{}` is not valid UTF-8", p.display()))?;
     GeminiRosterStore::load_dir(&dir).map_err(|e| anyhow!("{e}"))
 }
 
@@ -925,7 +938,8 @@ pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
         diagnostics: Vec<Diagnostic>,
     }
 
-    let catalog = catalog_for(&ctx).unwrap_or_else(|_| katachi_core::harness::RosterCatalog::empty(HarnessKind::Gemini));
+    let catalog = catalog_for(&ctx)
+        .unwrap_or_else(|_| katachi_core::harness::RosterCatalog::empty(HarnessKind::Gemini));
     let extension_count = catalog
         .iter_items()
         .filter(|(r, _)| r.kind == "extension")
@@ -963,23 +977,20 @@ pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
         println!("  binary             : {}", report.binary);
         println!(
             "  binary found       : {}",
-            report
-                .resolved_binary
-                .as_deref()
-                .unwrap_or("not on PATH")
+            report.resolved_binary.as_deref().unwrap_or("not on PATH")
         );
         println!("  home               : {}", report.home);
         println!("  user roots         : {}", report.user_roots.join(", "));
         println!("  project roots      : {}", report.project_roots.join(", "));
-        println!("  extension roots    : {}", report.extension_roots.join(", "));
+        println!(
+            "  extension roots    : {}",
+            report.extension_roots.join(", ")
+        );
         println!(
             "  preview opt-in     : {}",
             report.treat_preview_features_as_opt_in
         );
-        println!(
-            "  preserve overlays  : {}",
-            report.preserve_failed_overlays
-        );
+        println!("  preserve overlays  : {}", report.preserve_failed_overlays);
         println!();
         println!(
             "inventory: {} extensions, {} settings layers",
@@ -1112,15 +1123,13 @@ fn build_overlay(
     resolved: &katachi_core::plan::ResolvedKatachi,
     catalog: &katachi_core::harness::RosterCatalog,
 ) -> Result<(TempOverlay, OverlayManifest)> {
-    let gcfg = GeminiConfig::from_katachi(&ctx.config)
-        .map_err(|e| anyhow!("{e}"))?;
+    let gcfg = GeminiConfig::from_katachi(&ctx.config).map_err(|e| anyhow!("{e}"))?;
     let home = gcfg.resolved_home().map_err(|e| anyhow!("{e}"))?;
     let extension_roots = gcfg.resolved_extension_roots(&home);
     let ext_discovery = ExtensionDiscovery::discover(&extension_roots);
 
-    let (overlay, manifest) =
-        materialize_overlay(resolved, catalog, &ext_discovery.extensions)
-            .map_err(|e| anyhow!("{e}"))?;
+    let (overlay, manifest) = materialize_overlay(resolved, catalog, &ext_discovery.extensions)
+        .map_err(|e| anyhow!("{e}"))?;
     Ok((overlay, manifest))
 }
 

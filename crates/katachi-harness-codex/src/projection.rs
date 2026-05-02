@@ -191,7 +191,9 @@ mod tests {
             },
         );
         assert!(has_blocking(&diags));
-        assert!(diags.iter().any(|d| d.code == "codex.projection.sdk-py.disabled"));
+        assert!(diags
+            .iter()
+            .any(|d| d.code == "codex.projection.sdk-py.disabled"));
     }
 
     #[test]
@@ -210,7 +212,9 @@ mod tests {
             &CodexSettings::default(),
         );
         assert!(!has_blocking(&diags));
-        assert!(diags.iter().any(|d| d.code == "codex.projection.sdk-ts.hooks"));
+        assert!(diags
+            .iter()
+            .any(|d| d.code == "codex.projection.sdk-ts.hooks"));
     }
 
     #[test]

@@ -55,7 +55,8 @@ impl HarnessModule for CodexHarness {
             });
         }
         if !item.raw.is_null() {
-            let body = serde_json::to_string_pretty(&item.raw).unwrap_or_else(|_| "<unprintable>".into());
+            let body =
+                serde_json::to_string_pretty(&item.raw).unwrap_or_else(|_| "<unprintable>".into());
             sections.push(ExplainSection {
                 title: "Raw".into(),
                 body,

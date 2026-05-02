@@ -108,10 +108,7 @@ project_roots = ["."]
             .env("KATACHI_CONFIG", &self.config_path)
             .env("KATACHI_DATA", &self.data_root)
             .env("KATACHI_CACHE", self.data_root.join("cache"))
-            .args([
-                "--cwd",
-                self.root.to_str().unwrap(),
-            ])
+            .args(["--cwd", self.root.to_str().unwrap()])
             .args(args);
         cmd.output().unwrap()
     }
@@ -155,9 +152,7 @@ fn doctor_reports_binary_resolution() {
 #[test]
 fn plan_renders_full_argv() {
     let fx = Fixture::new();
-    let out = fx.run(&[
-        "harness", "claude", "plan", "greet", "execute", "hello",
-    ]);
+    let out = fx.run(&["harness", "claude", "plan", "greet", "execute", "hello"]);
     assert_success(&out, "plan");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("--print"));
@@ -190,9 +185,7 @@ fn dump_roster_emits_json() {
 #[test]
 fn project_ts_emits_sdk_runner() {
     let fx = Fixture::new();
-    let out = fx.run(&[
-        "harness", "claude", "project", "greet", "--sdk", "ts",
-    ]);
+    let out = fx.run(&["harness", "claude", "project", "greet", "--sdk", "ts"]);
     assert_success(&out, "project");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("@anthropic-ai/claude-agent-sdk"));
@@ -202,8 +195,6 @@ fn project_ts_emits_sdk_runner() {
 #[test]
 fn unknown_roster_id_exits_resolve() {
     let fx = Fixture::new();
-    let out = fx.run(&[
-        "harness", "claude", "plan", "ghost", "execute", "prompt",
-    ]);
+    let out = fx.run(&["harness", "claude", "plan", "ghost", "execute", "prompt"]);
     assert_eq!(out.status.code(), Some(4), "expected Resolve exit code");
 }

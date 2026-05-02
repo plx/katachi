@@ -27,20 +27,16 @@ pub fn scan_loose_skills(
     Ok(())
 }
 
-fn discover_in_dir(
-    state: &mut ScanState,
-    dir: &ClaudeDir,
-) -> Result<(), ClaudeDiscoveryError> {
+fn discover_in_dir(state: &mut ScanState, dir: &ClaudeDir) -> Result<(), ClaudeDiscoveryError> {
     let skills_dir = dir.skills_dir();
     if !skills_dir.exists() {
         return Ok(());
     }
-    let read = std::fs::read_dir(skills_dir.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let read =
+        std::fs::read_dir(skills_dir.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: skills_dir.clone(),
             source,
-        }
-    })?;
+        })?;
     let mut entries: Vec<camino::Utf8PathBuf> = Vec::new();
     for entry in read {
         let entry = entry.map_err(|source| ClaudeDiscoveryError::Io {
@@ -125,12 +121,11 @@ fn parse_skill_file(
     path: &Utf8Path,
     scope: ClaudeScope,
 ) -> Result<Option<(DiscoveredItem, Vec<SkillPending>)>, ClaudeDiscoveryError> {
-    let source = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let source =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
+        })?;
     let doc = frontmatter::parse(path, &source)?;
 
     let name = match doc.get_str("name") {
@@ -164,7 +159,11 @@ fn parse_skill_file(
         .map(|v| v.into_iter().map(str::to_string).collect())
         .unwrap_or_default();
 
-    let item_ref = ItemRef::new(HarnessKind::Claude, ClaudeItemKind::Skill.as_str(), name.clone());
+    let item_ref = ItemRef::new(
+        HarnessKind::Claude,
+        ClaudeItemKind::Skill.as_str(),
+        name.clone(),
+    );
 
     let raw = serde_json::json!({
         "name": name,

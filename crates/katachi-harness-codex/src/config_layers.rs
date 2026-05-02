@@ -77,7 +77,11 @@ pub struct Profile {
 
 impl ConfigLayer {
     pub fn item_ref(&self) -> ItemRef {
-        ItemRef::new(HarnessKind::Codex, CodexItemKind::ConfigLayer.as_str(), &self.id)
+        ItemRef::new(
+            HarnessKind::Codex,
+            CodexItemKind::ConfigLayer.as_str(),
+            &self.id,
+        )
     }
 
     pub fn to_item(&self) -> DiscoveredItem {
@@ -442,7 +446,10 @@ mod tests {
     fn discover_includes_user_layer() {
         let (_td, root) = tmp_utf8();
         let codex_home = root.join("codex-home");
-        write(&codex_home.join("config.toml"), "approval_policy = \"never\"");
+        write(
+            &codex_home.join("config.toml"),
+            "approval_policy = \"never\"",
+        );
 
         let mut settings = CodexSettings::default();
         settings.codex_home = codex_home.clone();
@@ -471,7 +478,10 @@ mod tests {
         assert_eq!(layers.len(), 1);
         let l = &layers[0];
         assert_eq!(l.source, ConfigSource::Project);
-        assert!(!l.active, "project layer should be inactive when trust is required");
+        assert!(
+            !l.active,
+            "project layer should be inactive when trust is required"
+        );
         assert!(l.trust_required);
     }
 

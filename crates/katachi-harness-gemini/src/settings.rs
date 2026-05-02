@@ -136,7 +136,11 @@ impl SettingsDiscovery {
 pub fn to_discovered_item(layer: &SettingsLayer) -> DiscoveredItem {
     let id = layer.scope.item_id();
     DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Gemini, GeminiItemKind::SettingsLayer.as_str(), id),
+        item_ref: ItemRef::new(
+            HarnessKind::Gemini,
+            GeminiItemKind::SettingsLayer.as_str(),
+            id,
+        ),
         display_name: format!("settings.{}", layer.scope.as_str()),
         source: ItemSource {
             path: Some(layer.path.clone()),

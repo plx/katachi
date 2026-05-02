@@ -27,7 +27,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 use crate::plan::{ExecutionPlan, InvocationRequest};
-use crate::record::{ExecutionRecord, RunId};
+use crate::record::{ExecutionRecord, Outcome, RunId};
 use crate::transcript::TranscriptEvent;
 
 pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -102,6 +102,108 @@ pub struct RunDirectory {
     run_id: RunId,
     partial_path: Utf8PathBuf,
     final_path: Utf8PathBuf,
+}
+
+/// Policy used when finalizing a run directory.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CommitPolicy {
+    /// Commit only when execution produced a successful child outcome and
+    /// `manifest.json` was written successfully.
+    SuccessOnly,
+    /// Never commit the partial directory.
+    Never,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinalizedRunState {
+    Committed,
+    Partial,
+}
+
+/// Result of writing `manifest.json` and optionally committing a run.
+#[derive(Debug)]
+pub struct FinalizedRun {
+    pub run_id: RunId,
+    pub outcome: Option<Outcome>,
+    pub state: FinalizedRunState,
+    pub path: Utf8PathBuf,
+    pub partial_path: Utf8PathBuf,
+    pub final_path: Utf8PathBuf,
+    pub manifest: Option<RunManifest>,
+    pub manifest_error: Option<PersistError>,
+    pub commit_error: Option<PersistError>,
+}
+
+impl FinalizedRun {
+    pub fn is_committed(&self) -> bool {
+        self.state == FinalizedRunState::Committed
+    }
+
+    pub fn manifest_written(&self) -> bool {
+        self.manifest.is_some()
+    }
+}
+
+/// Write a run manifest and commit according to the shared persistence
+/// contract. Manifest write failure is a finalization failure: even a
+/// successful child outcome remains in `<run-id>.partial/`.
+pub fn finalize_run_directory(
+    run_dir: RunDirectory,
+    outcome: Option<Outcome>,
+    policy: CommitPolicy,
+) -> FinalizedRun {
+    let run_id = run_dir.run_id();
+    let partial_path = run_dir.partial_path().to_owned();
+    let final_path = run_dir.final_path().to_owned();
+
+    let (manifest, manifest_error) = match run_dir.write_manifest() {
+        Ok(manifest) => (Some(manifest), None),
+        Err(err) => (None, Some(err)),
+    };
+
+    let should_commit = matches!(policy, CommitPolicy::SuccessOnly)
+        && matches!(outcome, Some(Outcome::Success))
+        && manifest_error.is_none();
+
+    if should_commit {
+        match run_dir.commit() {
+            Ok(path) => FinalizedRun {
+                run_id,
+                outcome,
+                state: FinalizedRunState::Committed,
+                path,
+                partial_path,
+                final_path,
+                manifest,
+                manifest_error,
+                commit_error: None,
+            },
+            Err(err) => FinalizedRun {
+                run_id,
+                outcome,
+                state: FinalizedRunState::Partial,
+                path: partial_path.clone(),
+                partial_path,
+                final_path,
+                manifest,
+                manifest_error,
+                commit_error: Some(err),
+            },
+        }
+    } else {
+        FinalizedRun {
+            run_id,
+            outcome,
+            state: FinalizedRunState::Partial,
+            path: partial_path.clone(),
+            partial_path,
+            final_path,
+            manifest,
+            manifest_error,
+            commit_error: None,
+        }
+    }
 }
 
 impl RunDirectory {
@@ -645,6 +747,98 @@ mod tests {
             partial.exists(),
             "partial dir should persist on drop for diagnosis"
         );
+    }
+
+    #[test]
+    fn finalize_commits_success_with_manifest() {
+        let (_td, root) = runs_root();
+        let run_id = RunId::new();
+        let dir = RunDirectory::create(&root, run_id).unwrap();
+        dir.write_request(&sample_request()).unwrap();
+
+        let finalized =
+            finalize_run_directory(dir, Some(Outcome::Success), CommitPolicy::SuccessOnly);
+
+        assert!(finalized.is_committed());
+        assert!(finalized.manifest_written());
+        assert!(finalized.final_path.join(FILE_MANIFEST).exists());
+        assert!(!finalized.partial_path.exists());
+    }
+
+    #[test]
+    fn finalize_preserves_failure_partial_with_manifest() {
+        let (_td, root) = runs_root();
+        let dir = RunDirectory::create(&root, RunId::new()).unwrap();
+        dir.write_request(&sample_request()).unwrap();
+
+        let finalized =
+            finalize_run_directory(dir, Some(Outcome::Failure), CommitPolicy::SuccessOnly);
+
+        assert_eq!(finalized.state, FinalizedRunState::Partial);
+        assert!(finalized.manifest_written());
+        assert!(finalized.partial_path.join(FILE_MANIFEST).exists());
+        assert!(!finalized.final_path.exists());
+    }
+
+    #[test]
+    fn finalize_preserves_timeout_partial_with_manifest() {
+        let (_td, root) = runs_root();
+        let dir = RunDirectory::create(&root, RunId::new()).unwrap();
+        dir.write_request(&sample_request()).unwrap();
+
+        let finalized =
+            finalize_run_directory(dir, Some(Outcome::Timeout), CommitPolicy::SuccessOnly);
+
+        assert_eq!(finalized.state, FinalizedRunState::Partial);
+        assert!(finalized.manifest_written());
+        assert!(finalized.partial_path.exists());
+    }
+
+    #[test]
+    fn finalize_preserves_executor_error_partial_with_manifest() {
+        let (_td, root) = runs_root();
+        let dir = RunDirectory::create(&root, RunId::new()).unwrap();
+        dir.write_request(&sample_request()).unwrap();
+
+        let finalized = finalize_run_directory(dir, None, CommitPolicy::SuccessOnly);
+
+        assert_eq!(finalized.state, FinalizedRunState::Partial);
+        assert!(finalized.manifest_written());
+        assert!(finalized.partial_path.exists());
+    }
+
+    #[test]
+    fn finalize_manifest_error_blocks_success_commit() {
+        let (_td, root) = runs_root();
+        let dir = RunDirectory::create(&root, RunId::new()).unwrap();
+        dir.write_request(&sample_request()).unwrap();
+        fs::create_dir(dir.partial_path().join(FILE_MANIFEST)).unwrap();
+
+        let finalized =
+            finalize_run_directory(dir, Some(Outcome::Success), CommitPolicy::SuccessOnly);
+
+        assert_eq!(finalized.state, FinalizedRunState::Partial);
+        assert!(finalized.manifest_error.is_some());
+        assert!(finalized.partial_path.exists());
+        assert!(!finalized.final_path.exists());
+    }
+
+    #[test]
+    fn finalize_commit_error_preserves_partial() {
+        let (_td, root) = runs_root();
+        let run_id = RunId::new();
+        let dir = RunDirectory::create(&root, run_id).unwrap();
+        dir.write_request(&sample_request()).unwrap();
+        fs::create_dir(dir.final_path()).unwrap();
+        fs::write(dir.final_path().join("occupied"), b"busy").unwrap();
+
+        let finalized =
+            finalize_run_directory(dir, Some(Outcome::Success), CommitPolicy::SuccessOnly);
+
+        assert_eq!(finalized.state, FinalizedRunState::Partial);
+        assert!(finalized.manifest_written());
+        assert!(finalized.commit_error.is_some());
+        assert!(finalized.partial_path.exists());
     }
 
     #[test]
