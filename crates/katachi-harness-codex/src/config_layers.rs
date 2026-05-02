@@ -451,11 +451,14 @@ mod tests {
             "approval_policy = \"never\"",
         );
 
-        let mut settings = CodexSettings::default();
-        settings.codex_home = codex_home.clone();
+        let settings = CodexSettings {
+            codex_home: codex_home.clone(),
+            ..CodexSettings::default()
+        };
         let cwd = root.clone();
         let mut diags = Vec::new();
-        let layers = discover_config_layers(&settings, &[cwd.clone()], &cwd, &mut diags);
+        let layers =
+            discover_config_layers(&settings, std::slice::from_ref(&cwd), &cwd, &mut diags);
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].source, ConfigSource::User);
     }
@@ -474,7 +477,12 @@ mod tests {
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let layers = discover_config_layers(&settings, &[project.clone()], &project, &mut diags);
+        let layers = discover_config_layers(
+            &settings,
+            std::slice::from_ref(&project),
+            &project,
+            &mut diags,
+        );
         assert_eq!(layers.len(), 1);
         let l = &layers[0];
         assert_eq!(l.source, ConfigSource::Project);
@@ -499,7 +507,12 @@ mod tests {
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let layers = discover_config_layers(&settings, &[project.clone()], &project, &mut diags);
+        let layers = discover_config_layers(
+            &settings,
+            std::slice::from_ref(&project),
+            &project,
+            &mut diags,
+        );
         assert!(layers[0].active);
     }
 
@@ -524,7 +537,12 @@ approval_policy = "on-request"
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let layers = discover_config_layers(&settings, &[project.clone()], &project, &mut diags);
+        let layers = discover_config_layers(
+            &settings,
+            std::slice::from_ref(&project),
+            &project,
+            &mut diags,
+        );
         assert_eq!(layers[0].profiles.len(), 2);
         let mut names: Vec<_> = layers[0].profiles.iter().map(|p| p.name.clone()).collect();
         names.sort();
@@ -544,7 +562,12 @@ approval_policy = "on-request"
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let layers = discover_config_layers(&settings, &[project.clone()], &project, &mut diags);
+        let layers = discover_config_layers(
+            &settings,
+            std::slice::from_ref(&project),
+            &project,
+            &mut diags,
+        );
         let mut catalog = RosterCatalog::empty(HarnessKind::Codex);
         for l in &layers {
             catalog.insert_item(l.to_item()).unwrap();
@@ -568,7 +591,8 @@ approval_policy = "on-request"
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let layers = discover_config_layers(&settings, &[root.clone()], &root, &mut diags);
+        let layers =
+            discover_config_layers(&settings, std::slice::from_ref(&root), &root, &mut diags);
         assert!(layers.is_empty());
         assert!(diags.iter().any(|d| d.code == "codex.config.parse"));
     }

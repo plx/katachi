@@ -112,9 +112,7 @@ fn push_context_selectors(out: &mut Vec<Selector>, entries: &[String]) {
         let id = match entry.split(':').count() {
             2 => {
                 // scope:file -> context:<scope>:<file>
-                let mut it = entry.splitn(2, ':');
-                let scope = it.next().unwrap();
-                let file = it.next().unwrap();
+                let (scope, file) = entry.split_once(':').unwrap();
                 format!("context:{scope}:{file}")
             }
             _ => {

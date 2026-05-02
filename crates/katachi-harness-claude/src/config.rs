@@ -214,8 +214,10 @@ mod tests {
 
     #[test]
     fn tilde_expansion_normalizes_project_roots() {
-        let mut c = ClaudeConfig::default();
-        c.project_roots = vec![Utf8PathBuf::from("~/repo")];
+        let mut c = ClaudeConfig {
+            project_roots: vec![Utf8PathBuf::from("~/repo")],
+            ..ClaudeConfig::default()
+        };
         c.expand_home();
         if dirs::home_dir().is_some() {
             assert!(
@@ -228,8 +230,10 @@ mod tests {
 
     #[test]
     fn tilde_expansion_leaves_relative_paths_unchanged() {
-        let mut c = ClaudeConfig::default();
-        c.project_roots = vec![Utf8PathBuf::from(".")];
+        let mut c = ClaudeConfig {
+            project_roots: vec![Utf8PathBuf::from(".")],
+            ..ClaudeConfig::default()
+        };
         c.expand_home();
         assert_eq!(c.project_roots[0], Utf8PathBuf::from("."));
     }

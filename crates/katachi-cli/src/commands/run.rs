@@ -154,8 +154,8 @@ fn emit_runs_list(global: &GlobalArgs, summaries: &[RunSummary]) {
             return;
         }
         println!(
-            "{:<40} {:<10} {:<8} {:<8} {:<8} {}",
-            "run_id", "state", "harness", "backend", "outcome", "started_at"
+            "{:<40} {:<10} {:<8} {:<8} {:<8} started_at",
+            "run_id", "state", "harness", "backend", "outcome"
         );
         for s in summaries {
             println!(

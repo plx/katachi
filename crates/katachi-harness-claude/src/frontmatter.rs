@@ -170,11 +170,11 @@ fn parse_frontmatter(text: &str) -> Result<BTreeMap<String, FmValue>, String> {
 }
 
 fn strip_optional_quotes(mut s: String) -> String {
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        if s.len() >= 2 {
-            s.pop();
-            s.remove(0);
-        }
+    if ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+        && s.len() >= 2
+    {
+        s.pop();
+        s.remove(0);
     }
     s
 }

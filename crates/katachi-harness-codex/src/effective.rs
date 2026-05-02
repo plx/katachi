@@ -460,8 +460,10 @@ mod tests {
     #[test]
     fn run_profile_overrides_merged_policy() {
         let layers = [layer("user", "approval_policy = \"on-request\"", 100, true)];
-        let mut rp = RosterRunProfile::default();
-        rp.approval_policy = Some("never".into());
+        let rp = RosterRunProfile {
+            approval_policy: Some("never".into()),
+            ..RosterRunProfile::default()
+        };
         let inputs = BuildEffective {
             layers: &layers,
             instructions: &[],

@@ -54,11 +54,13 @@ impl Fixture {
 
         build(&root);
 
-        let mut cfg = GeminiConfig::default();
-        cfg.home = Some(home.clone());
-        cfg.user_roots = vec![home];
-        cfg.project_roots = vec![project.clone()];
-        cfg.extension_roots = vec![ext_root];
+        let cfg = GeminiConfig {
+            home: Some(home.clone()),
+            user_roots: vec![home],
+            project_roots: vec![project.clone()],
+            extension_roots: vec![ext_root],
+            ..GeminiConfig::default()
+        };
         Self {
             _tmp: tmp,
             cfg,

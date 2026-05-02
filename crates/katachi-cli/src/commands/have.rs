@@ -387,7 +387,7 @@ impl PreparedHave {
 }
 
 enum Prepared {
-    Ready(PreparedHave),
+    Ready(Box<PreparedHave>),
     Failed(ExitCode),
 }
 
@@ -474,7 +474,7 @@ fn prepare(global: &GlobalArgs, have: &HaveCmd, action: ActionRequest) -> Result
 
     let has_resolver_errors = any_error(&output.resolved.diagnostics);
     let has_validation_errors = any_error(&validator_diagnostics);
-    Ok(Prepared::Ready(PreparedHave {
+    Ok(Prepared::Ready(Box::new(PreparedHave {
         raw_definition: definition_raw,
         definition,
         output,
@@ -486,7 +486,7 @@ fn prepare(global: &GlobalArgs, have: &HaveCmd, action: ActionRequest) -> Result
         storage,
         cwd,
         registry,
-    }))
+    })))
 }
 
 fn build_plan_for_prepared(global: &GlobalArgs, prepared: &PreparedHave) -> Result<ExecutionPlan> {

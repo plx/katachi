@@ -56,7 +56,7 @@ impl HarnessModule for ClaudeHarness {
         // Hand the shared executor our Claude-specific stdout normalizer
         // so stream-json output comes out of the run with typed events.
         let normalizer: Box<dyn Fn(&str) -> katachi_core::transcript::EventKind + Send + Sync> =
-            Box::new(|line| crate::transcript::parse_line(line));
+            Box::new(crate::transcript::parse_line);
         katachi_core::execute::run_with_normalizer(ctx, Some(normalizer.as_ref()))
     }
 

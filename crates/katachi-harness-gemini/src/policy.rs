@@ -218,15 +218,13 @@ impl ResolvedPolicy {
         let mut settings_items: Vec<(&katachi_core::roster::DiscoveredItem, u32)> = Vec::new();
         for (_, item) in catalog.iter_items() {
             if item.item_ref.kind == crate::item::GeminiItemKind::SettingsLayer.as_str() {
-                let rank = item
-                    .raw
-                    .get("rank")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or_else(|| match item.source.scope.as_deref() {
+                let rank = item.raw.get("rank").and_then(|v| v.as_u64()).unwrap_or(
+                    match item.source.scope.as_deref() {
                         Some("project") => 1,
                         Some("generated") => 2,
                         _ => 0,
-                    }) as u32;
+                    },
+                ) as u32;
                 settings_items.push((item, rank));
             }
         }
@@ -237,11 +235,11 @@ impl ResolvedPolicy {
 
         let mut extension_policies: Vec<&Value> = Vec::new();
         for (_, item) in catalog.iter_items() {
-            if item.item_ref.kind == crate::item::GeminiItemKind::PolicySet.as_str() {
-                if matches!(item.source.scope.as_deref(), Some("extension")) {
-                    if let Some(body) = item.raw.get("body") {
-                        extension_policies.push(body);
-                    }
+            if item.item_ref.kind == crate::item::GeminiItemKind::PolicySet.as_str()
+                && matches!(item.source.scope.as_deref(), Some("extension"))
+            {
+                if let Some(body) = item.raw.get("body") {
+                    extension_policies.push(body);
                 }
             }
         }

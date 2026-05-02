@@ -214,10 +214,5 @@ Required for this branch:
 cargo fmt --check
 git diff --check origin/main...HEAD
 cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
 ```
-
-`cargo clippy --workspace --all-targets -- -D warnings` remains a
-recommended advisory gate. The repository has not made clippy a hard
-gate in this branch. On 2026-05-02 it still reported existing warnings
-across the harness crates, mostly in older tests and helper modules. New
-code should still avoid adding warnings in touched modules.

@@ -113,7 +113,8 @@ fn nested_project_configs_stack_root_to_cwd() {
     let settings = fx.settings();
     let cwd = project.join("a/b");
     let mut diags = Vec::new();
-    let layers = discover_config_layers(&settings, &[project.clone()], &cwd, &mut diags);
+    let layers =
+        discover_config_layers(&settings, std::slice::from_ref(&project), &cwd, &mut diags);
     let project_layers: Vec<_> = layers
         .iter()
         .filter(|l| l.source == ConfigSource::Project)
@@ -339,8 +340,13 @@ mcp_requirements: [does-not-exist]
 
     let settings = fx.settings();
     let mut diags = Vec::new();
-    let layers = discover_config_layers(&settings, &[fx.root.clone()], &fx.root, &mut diags);
-    let skills = discover_skills(&settings, &[fx.root.clone()], &mut diags);
+    let layers = discover_config_layers(
+        &settings,
+        std::slice::from_ref(&fx.root),
+        &fx.root,
+        &mut diags,
+    );
+    let skills = discover_skills(&settings, std::slice::from_ref(&fx.root), &mut diags);
     let mcps = discover_mcp_servers(&layers, &mut diags);
     let eff = build_effective(BuildEffective {
         layers: &layers,
@@ -365,7 +371,12 @@ fn backend_projection_sdk_py_disabled_blocks() {
     fx.write("home/config.toml", "model = \"gpt\"");
     let settings = fx.settings(); // enable_python_sdk = false
     let mut diags = Vec::new();
-    let layers = discover_config_layers(&settings, &[fx.root.clone()], &fx.root, &mut diags);
+    let layers = discover_config_layers(
+        &settings,
+        std::slice::from_ref(&fx.root),
+        &fx.root,
+        &mut diags,
+    );
     let eff = build_effective(BuildEffective {
         layers: &layers,
         instructions: &[],
@@ -462,6 +473,10 @@ fn roster_placeholder() -> CodexRosterFile {
 fn all_helpers_compile() {
     let fx = Fx::new();
     let _ = fx.settings();
-    let _ = discover_agents(&fx.settings(), &[fx.root.clone()], &mut Vec::new());
+    let _ = discover_agents(
+        &fx.settings(),
+        std::slice::from_ref(&fx.root),
+        &mut Vec::new(),
+    );
     let _: &Utf8Path = fx.root.as_ref();
 }

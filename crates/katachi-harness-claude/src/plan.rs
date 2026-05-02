@@ -159,7 +159,7 @@ fn build_cli_plan(inputs: ClaudePlanInputs<'_>) -> Result<ExecutionPlan, PlanErr
         if materialization
             .files
             .iter()
-            .any(|f| f.dest == Utf8PathBuf::from("settings.json"))
+            .any(|f| f.dest.as_str() == "settings.json")
         {
             argv.push("--settings".into());
             argv.push(settings.to_string());
@@ -168,7 +168,7 @@ fn build_cli_plan(inputs: ClaudePlanInputs<'_>) -> Result<ExecutionPlan, PlanErr
         if materialization
             .files
             .iter()
-            .any(|f| f.dest == Utf8PathBuf::from("mcp.json"))
+            .any(|f| f.dest.as_str() == "mcp.json")
         {
             argv.push("--mcp-config".into());
             argv.push(mcp.to_string());
@@ -301,14 +301,12 @@ pub fn build_overlay_plan(resolved: &ResolvedClaudeRoster) -> MaterializationPla
                     mcp_fragment.insert(r.item.id.clone(), item.raw.clone());
                 }
             }
-            "hook_set" => {
-                if item.source.provenance.as_deref() == Some("settings-hook") {
-                    if let (Some(trigger), Some(config)) = (
-                        item.raw.get("trigger").and_then(|v| v.as_str()),
-                        item.raw.get("config"),
-                    ) {
-                        settings_hooks.insert(trigger.to_string(), config.clone());
-                    }
+            "hook_set" if item.source.provenance.as_deref() == Some("settings-hook") => {
+                if let (Some(trigger), Some(config)) = (
+                    item.raw.get("trigger").and_then(|v| v.as_str()),
+                    item.raw.get("config"),
+                ) {
+                    settings_hooks.insert(trigger.to_string(), config.clone());
                 }
             }
             "plugin" => {
@@ -750,10 +748,7 @@ skills = ["axe"]
         .unwrap();
         let resolved = resolve_roster(&roster, cat, BackendKind::Cli);
         let plan = build_overlay_plan(&resolved);
-        assert!(plan
-            .files
-            .iter()
-            .any(|f| f.dest == Utf8PathBuf::from("mcp.json")));
+        assert!(plan.files.iter().any(|f| f.dest.as_str() == "mcp.json"));
     }
 
     #[test]
@@ -836,6 +831,6 @@ instructions = ["project:CLAUDE.md"]
         assert!(plan
             .files
             .iter()
-            .any(|f| f.dest == Utf8PathBuf::from("project/.claude/CLAUDE.md")));
+            .any(|f| f.dest.as_str() == "project/.claude/CLAUDE.md"));
     }
 }

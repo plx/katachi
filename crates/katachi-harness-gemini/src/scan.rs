@@ -310,7 +310,7 @@ fn containment_edge(from: &ItemRef, to: &ItemRef, kind: GeminiEdgeKind) -> Depen
 /// item's kind.
 pub fn explain_sections_for(item: &DiscoveredItem, catalog: &RosterCatalog) -> Vec<ExplainSection> {
     let mut sections = Vec::new();
-    if !item.source.path.is_none() {
+    if item.source.path.is_some() {
         sections.push(ExplainSection {
             title: "Source".into(),
             body: format!(
@@ -449,11 +449,13 @@ mod tests {
             "---\ndescription: loose skill\n---\n",
         );
 
-        let mut cfg = GeminiConfig::default();
-        cfg.home = Some(home.clone());
-        cfg.user_roots = vec![home];
-        cfg.project_roots = vec![project.clone()];
-        cfg.extension_roots = vec![ext_root];
+        let cfg = GeminiConfig {
+            home: Some(home.clone()),
+            user_roots: vec![home],
+            project_roots: vec![project.clone()],
+            extension_roots: vec![ext_root],
+            ..GeminiConfig::default()
+        };
         (tmp, cfg, project)
     }
 

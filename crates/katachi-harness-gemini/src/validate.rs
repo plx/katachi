@@ -286,8 +286,10 @@ harness = "gemini"
 
     #[test]
     fn disable_extensions_fails_when_extensions_selected() {
-        let mut policy = ResolvedPolicy::default();
-        policy.extensions_disabled = true;
+        let policy = ResolvedPolicy {
+            extensions_disabled: true,
+            ..ResolvedPolicy::default()
+        };
         let v = GeminiPolicyValidator::new(policy);
         let res = resolved(vec![pick("extension", "a")]);
         let mut cat = RosterCatalog::empty(HarnessKind::Gemini);
@@ -304,8 +306,10 @@ harness = "gemini"
 
     #[test]
     fn allowlist_blocks_other_extensions() {
-        let mut policy = ResolvedPolicy::default();
-        policy.allowed_extensions = vec!["alpha".into()];
+        let policy = ResolvedPolicy {
+            allowed_extensions: vec!["alpha".into()],
+            ..ResolvedPolicy::default()
+        };
         let v = GeminiPolicyValidator::new(policy);
         let res = resolved(vec![pick("extension", "beta")]);
         let mut cat = RosterCatalog::empty(HarnessKind::Gemini);
@@ -322,8 +326,10 @@ harness = "gemini"
 
     #[test]
     fn mcp_disabled_fails_when_mcp_selected() {
-        let mut policy = ResolvedPolicy::default();
-        policy.mcp_disabled = true;
+        let policy = ResolvedPolicy {
+            mcp_disabled: true,
+            ..ResolvedPolicy::default()
+        };
         let v = GeminiPolicyValidator::new(policy);
         let res = resolved(vec![pick("mcp_server", "ext:foo:chrome")]);
         let mut cat = RosterCatalog::empty(HarnessKind::Gemini);
@@ -355,8 +361,10 @@ harness = "gemini"
 
     #[test]
     fn preview_validator_silent_when_flag_enabled() {
-        let mut policy = ResolvedPolicy::default();
-        policy.preview_features_enabled = true;
+        let policy = ResolvedPolicy {
+            preview_features_enabled: true,
+            ..ResolvedPolicy::default()
+        };
         let v = GeminiPreviewValidator::new(policy);
         let res = resolved(vec![pick("subagent", "explorer")]);
         let mut cat = RosterCatalog::empty(HarnessKind::Gemini);

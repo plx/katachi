@@ -280,16 +280,17 @@ pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
     let ctx = prepare(global)?;
     let settings = ctx.settings.clone();
 
-    let mut report = DoctorReport::default();
-    report.binary = settings.binary.clone();
-    report.binary_on_path = which::which(&settings.binary).is_ok();
-    report.codex_home = settings.codex_home.clone();
-    report.codex_home_exists = settings.codex_home.exists();
-    report.project_roots = resolve_project_roots(&settings.project_roots, &ctx.cwd);
-    report.respect_project_trust = settings.respect_project_trust;
-    report.enable_python_sdk = settings.enable_python_sdk;
-    report.counts_by_kind = count_by_kind(&ctx.catalog);
-    report.diagnostics = ctx.catalog.diagnostics.clone();
+    let report = DoctorReport {
+        binary: settings.binary.clone(),
+        binary_on_path: which::which(&settings.binary).is_ok(),
+        codex_home: settings.codex_home.clone(),
+        codex_home_exists: settings.codex_home.exists(),
+        project_roots: resolve_project_roots(&settings.project_roots, &ctx.cwd),
+        respect_project_trust: settings.respect_project_trust,
+        enable_python_sdk: settings.enable_python_sdk,
+        counts_by_kind: count_by_kind(&ctx.catalog),
+        diagnostics: ctx.catalog.diagnostics.clone(),
+    };
 
     if global.json {
         serde_json::to_writer_pretty(std::io::stdout(), &report)?;
@@ -681,7 +682,7 @@ impl BuiltBundle {
             self.effective.policy.output_schema_file
         );
         println!("mcp servers:");
-        for (name, _) in &self.effective.mcp_servers {
+        for name in self.effective.mcp_servers.keys() {
             println!("  - {name}");
         }
         println!(

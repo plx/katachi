@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use camino::Utf8PathBuf;
 use katachi_core::error::PlanError;
 use katachi_core::harness::PlanContext;
-use katachi_core::model::{BackendKind, HarnessKind, MaterializationMode};
+use katachi_core::model::{BackendKind, HarnessKind};
 use katachi_core::plan::{
     ActionRequest, ExecutionBackendPlan, ExecutionPlan, MaterializationPlan, TranscriptMode,
     PLAN_SCHEMA_VERSION,
@@ -134,12 +134,8 @@ pub fn build_plan(ctx: &PlanContext<'_>) -> Result<ExecutionPlan, PlanError> {
 
     let planned = plan(&inputs)?;
 
-    let mode = match ctx.request.materialization {
-        MaterializationMode::Ambient => MaterializationMode::Ambient,
-        MaterializationMode::TempOverlay => MaterializationMode::TempOverlay,
-    };
     let materialization = MaterializationPlan {
-        mode,
+        mode: ctx.request.materialization,
         overlay_root: planned.overlay_root.clone(),
         files: planned.materialization.files.clone(),
         env: planned.materialization.env.clone(),

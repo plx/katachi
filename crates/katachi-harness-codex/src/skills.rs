@@ -350,7 +350,7 @@ Summary line.
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let skills = discover_skills(&settings, &[root.clone()], &mut diags);
+        let skills = discover_skills(&settings, std::slice::from_ref(&root), &mut diags);
         assert_eq!(skills.len(), 1);
         let s = &skills[0];
         assert_eq!(s.id, "axe");
@@ -373,7 +373,7 @@ Summary line.
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let skills = discover_skills(&settings, &[root.clone()], &mut diags);
+        let skills = discover_skills(&settings, std::slice::from_ref(&root), &mut diags);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].id, "plain");
     }
@@ -394,7 +394,7 @@ mcp_requirements: [chrome]
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let skills = discover_skills(&settings, &[root.clone()], &mut diags);
+        let skills = discover_skills(&settings, std::slice::from_ref(&root), &mut diags);
         let mcps = vec![McpServer {
             id: "user:chrome".into(),
             name: "chrome".into(),

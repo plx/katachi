@@ -284,7 +284,7 @@ fn run_validate(global: &GlobalArgs, id: &str) -> Result<ExitCode> {
         },
         &validators,
     );
-    match harness_specific_diagnostics(&raw_def, &def, &output, &load.config, &storage, &cwd) {
+    match harness_specific_diagnostics(raw_def, &def, &output, &load.config, &storage, &cwd) {
         Ok(mut diags) => validator_diags.append(&mut diags),
         Err(err) => {
             emit_resolve_error(global, &err);

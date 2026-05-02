@@ -180,7 +180,7 @@ pub fn discover_roots(cwd: &Utf8Path, config: &ClaudeConfig) -> DiscoveredRoots 
     }
 
     for root in &expanded.plugin_roots {
-        let scope = if is_under(&root, &expanded.user_root) {
+        let scope = if is_under(root, &expanded.user_root) {
             ClaudeScope::PluginUser
         } else {
             ClaudeScope::PluginProject
@@ -217,10 +217,12 @@ mod tests {
         fs::create_dir_all(cwd.join(".claude")).unwrap();
         fs::write(cwd.join("CLAUDE.md"), "hello").unwrap();
 
-        let mut config = ClaudeConfig::default();
-        config.user_root = cwd.join("user-home/.claude");
-        config.plugin_roots = vec![cwd.join("user-home/.claude/plugins")];
-        config.project_roots = vec![Utf8PathBuf::from(".")];
+        let config = ClaudeConfig {
+            user_root: cwd.join("user-home/.claude"),
+            plugin_roots: vec![cwd.join("user-home/.claude/plugins")],
+            project_roots: vec![Utf8PathBuf::from(".")],
+            ..ClaudeConfig::default()
+        };
 
         let roots = discover_roots(&cwd, &config);
         assert!(roots
@@ -262,10 +264,12 @@ mod tests {
         let abs_project = cwd.join("other-project");
         fs::create_dir_all(&abs_project).unwrap();
 
-        let mut config = ClaudeConfig::default();
-        config.user_root = cwd.join("user/.claude");
-        config.plugin_roots.clear();
-        config.project_roots = vec![abs_project.clone()];
+        let config = ClaudeConfig {
+            user_root: cwd.join("user/.claude"),
+            plugin_roots: Vec::new(),
+            project_roots: vec![abs_project.clone()],
+            ..ClaudeConfig::default()
+        };
 
         let roots = discover_roots(&cwd, &config);
         assert!(roots
@@ -305,10 +309,12 @@ mod tests {
         fs::create_dir_all(user_home.join(".claude/plugins/web-a11y")).unwrap();
         fs::write(user_home.join(".claude/CLAUDE.md"), "user").unwrap();
 
-        let mut config = ClaudeConfig::default();
-        config.user_root = user_home.join(".claude");
-        config.plugin_roots = vec![user_home.join(".claude/plugins")];
-        config.project_roots = vec![Utf8PathBuf::from(".")];
+        let config = ClaudeConfig {
+            user_root: user_home.join(".claude"),
+            plugin_roots: vec![user_home.join(".claude/plugins")],
+            project_roots: vec![Utf8PathBuf::from(".")],
+            ..ClaudeConfig::default()
+        };
 
         let roots = discover_roots(&cwd, &config);
 
@@ -339,11 +345,13 @@ mod tests {
         let td = TempDir::new().unwrap();
         let cwd = Utf8PathBuf::from_path_buf(td.path().to_path_buf()).unwrap();
 
-        let mut config = ClaudeConfig::default();
+        let config = ClaudeConfig {
+            user_root: cwd.join("ghost-user/.claude"),
+            plugin_roots: vec![cwd.join("ghost-user/.claude/plugins")],
+            project_roots: vec![Utf8PathBuf::from(".")],
+            ..ClaudeConfig::default()
+        };
         // None of these paths exist on disk.
-        config.user_root = cwd.join("ghost-user/.claude");
-        config.plugin_roots = vec![cwd.join("ghost-user/.claude/plugins")];
-        config.project_roots = vec![Utf8PathBuf::from(".")];
 
         let roots = discover_roots(&cwd, &config);
         assert!(!roots.claude_dirs.is_empty());

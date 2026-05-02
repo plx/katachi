@@ -158,7 +158,7 @@ fn preview(contents: &str) -> String {
     let mut out = String::new();
     for (i, line) in contents.lines().enumerate() {
         if i >= 3 {
-            out.push_str("…");
+            out.push('…');
             break;
         }
         if !out.is_empty() {

@@ -335,7 +335,7 @@ inherit_session = false
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let agents = discover_agents(&settings, &[root.clone()], &mut diags);
+        let agents = discover_agents(&settings, std::slice::from_ref(&root), &mut diags);
         assert_eq!(agents.len(), 1);
         let a = &agents[0];
         assert_eq!(a.id, "readonly");
@@ -356,7 +356,7 @@ inherit_session = false
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let agents = discover_agents(&settings, &[root.clone()], &mut diags);
+        let agents = discover_agents(&settings, std::slice::from_ref(&root), &mut diags);
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].raw["source"], "yaml");
         assert!(agents[0]
@@ -377,7 +377,7 @@ inherit_session = false
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let agents = discover_agents(&settings, &[root.clone()], &mut diags);
+        let agents = discover_agents(&settings, std::slice::from_ref(&root), &mut diags);
         assert!(agents[0].inherits_session);
     }
 }
