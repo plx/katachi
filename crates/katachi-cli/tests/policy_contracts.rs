@@ -659,8 +659,8 @@ harness = "claude"
 // =================================================================
 
 #[test]
-fn json_have_graph_emits_structured_not_implemented_error() {
-    // Until plan 3 lands, `have <id> graph` is stubbed; with --json it
+fn json_have_execute_emits_structured_not_implemented_error() {
+    // `have <id> execute` is stubbed until Plan 5 lands; with --json it
     // must emit a parseable JSON object describing the not-implemented
     // status, not a plain-text error.
     let td = TempDir::new().unwrap();
@@ -675,7 +675,7 @@ fn json_have_graph_emits_structured_not_implemented_error() {
         .env("KATACHI_DATA", &data_root)
         .env("KATACHI_CACHE", data_root.join("cache"))
         .env("KATACHI_CONFIG", &config_path)
-        .args(["--json", "have", "anything", "graph"]);
+        .args(["--json", "have", "anything", "execute", "hi"]);
     let out = cmd.output().unwrap();
     assert_eq!(
         out.status.code(),

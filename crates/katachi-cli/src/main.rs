@@ -4,6 +4,7 @@ mod cli;
 mod commands;
 mod exit;
 mod fixtures;
+mod harness_registry;
 mod logging;
 
 use clap::Parser;
@@ -48,6 +49,16 @@ fn dispatch_have(global: &GlobalArgs, have: HaveCmd) -> ExitCode {
                 ExitCode::Config
             }
         },
+        HaveAction::Graph { format } => {
+            let format = *format;
+            match commands::have::run_graph(global, &have, format) {
+                Ok(code) => code,
+                Err(err) => {
+                    eprintln!("katachi have: {err:#}");
+                    ExitCode::Config
+                }
+            }
+        }
         _ => not_yet_implemented(global, &Command::Have(have)),
     }
 }
