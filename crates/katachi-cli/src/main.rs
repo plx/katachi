@@ -36,7 +36,20 @@ fn dispatch(cli: Cli) -> ExitCode {
                 ExitCode::Config
             }
         },
-        other => not_yet_implemented(&global, &other),
+        Command::Run(cmd) => match commands::run::dispatch(&global, cmd) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!("katachi run: {err:#}");
+                ExitCode::Config
+            }
+        },
+        Command::Katachi(cmd) => match commands::katachi::dispatch(&global, cmd) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!("katachi katachi: {err:#}");
+                ExitCode::Config
+            }
+        },
     }
 }
 
@@ -84,24 +97,9 @@ fn dispatch_have(global: &GlobalArgs, have: HaveCmd) -> ExitCode {
     }
 }
 
+#[allow(dead_code)]
 fn not_yet_implemented(global: &GlobalArgs, cmd: &Command) -> ExitCode {
-    let label = describe_command(cmd);
-    let message = format!("`{label}` is not yet implemented in this phase");
-    if global.json {
-        let payload = serde_json::json!({
-            "error": {
-                "kind": "not_implemented",
-                "command": label,
-                "message": message,
-            }
-        });
-        if serde_json::to_writer_pretty(std::io::stdout(), &payload).is_ok() {
-            println!();
-        }
-    } else {
-        eprintln!("katachi: {message}");
-    }
-    ExitCode::NotImplemented
+    exit::emit_not_implemented(global.json, &describe_command(cmd))
 }
 
 fn describe_command(cmd: &Command) -> String {

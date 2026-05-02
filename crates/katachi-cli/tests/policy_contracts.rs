@@ -659,15 +659,31 @@ harness = "claude"
 // =================================================================
 
 #[test]
-fn json_katachi_show_emits_structured_not_implemented_error() {
-    // `katachi show <id>` is stubbed until Plan 6 lands; with --json it
-    // must emit a parseable JSON object describing the not-implemented
+fn json_harness_codex_project_emits_structured_not_implemented_error() {
+    // `harness codex project` remains stubbed until Plan 7; with --json
+    // it must emit a parseable JSON object describing the not-implemented
     // status, not a plain-text error.
     let td = TempDir::new().unwrap();
     let data_root = td.path().join("data");
     fs::create_dir_all(data_root.join("katachis")).unwrap();
+    fs::create_dir_all(data_root.join("rosters/codex")).unwrap();
+    let codex_home = td.path().join("codex-home");
+    fs::create_dir_all(&codex_home).unwrap();
     let config_path = td.path().join("config.toml");
-    fs::write(&config_path, "version = 1\n").unwrap();
+    fs::write(
+        &config_path,
+        format!(
+            r#"version = 1
+[harnesses.codex]
+binary = "/bin/false"
+codex_home = "{home}"
+project_roots = ["."]
+respect_project_trust = false
+"#,
+            home = codex_home.display()
+        ),
+    )
+    .unwrap();
 
     let mut cmd = katachi_bin();
     cmd.env_remove("KATACHI_LOG")
@@ -675,7 +691,7 @@ fn json_katachi_show_emits_structured_not_implemented_error() {
         .env("KATACHI_DATA", &data_root)
         .env("KATACHI_CACHE", data_root.join("cache"))
         .env("KATACHI_CONFIG", &config_path)
-        .args(["--json", "katachi", "show", "anything"]);
+        .args(["--json", "harness", "codex", "project", "anything", "--sdk", "ts"]);
     let out = cmd.output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -690,31 +706,3 @@ fn json_katachi_show_emits_structured_not_implemented_error() {
     assert_eq!(v["error"]["kind"], "not_implemented");
 }
 
-#[test]
-fn json_run_list_emits_structured_not_implemented_error() {
-    let td = TempDir::new().unwrap();
-    let data_root = td.path().join("data");
-    fs::create_dir_all(data_root.join("katachis")).unwrap();
-    let config_path = td.path().join("config.toml");
-    fs::write(&config_path, "version = 1\n").unwrap();
-
-    let mut cmd = katachi_bin();
-    cmd.env_remove("KATACHI_LOG")
-        .env_remove("RUST_LOG")
-        .env("KATACHI_DATA", &data_root)
-        .env("KATACHI_CACHE", data_root.join("cache"))
-        .env("KATACHI_CONFIG", &config_path)
-        .args(["--json", "run", "list"]);
-    let out = cmd.output().unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(64),
-        "stubbed command must exit ExitCode::NotImplemented (64); stderr:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
-        panic!("--json output must be valid JSON; err={err}; got: {stdout}")
-    });
-    assert_eq!(v["error"]["kind"], "not_implemented");
-}

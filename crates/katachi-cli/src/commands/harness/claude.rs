@@ -47,14 +47,14 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
         HarnessAction::Doctor => run_doctor(global, &ctx),
         HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, &ctx, &roster_id),
         HarnessAction::Project { roster_id, sdk } => run_project(global, &ctx, &roster_id, sdk),
-        HarnessAction::DumpSettings { .. } => {
-            eprintln!("katachi: `harness claude dump-settings` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
-        HarnessAction::EffectiveConfig { .. } => {
-            eprintln!("katachi: `harness claude effective-config` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
+        HarnessAction::DumpSettings { .. } => Ok(crate::exit::emit_not_implemented(
+            global.json,
+            "harness claude dump-settings",
+        )),
+        HarnessAction::EffectiveConfig { .. } => Ok(crate::exit::emit_not_implemented(
+            global.json,
+            "harness claude effective-config",
+        )),
     }
 }
 

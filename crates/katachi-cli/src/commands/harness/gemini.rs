@@ -49,18 +49,18 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
         HarnessAction::Execute { roster_id, prompt } => run_execute(global, &roster_id, &prompt),
         HarnessAction::Doctor => run_doctor(global),
         HarnessAction::DumpSettings { roster_id } => run_dump_settings(global, &roster_id),
-        HarnessAction::DumpRoster { .. } => {
-            eprintln!("katachi: `harness gemini dump-roster` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
-        HarnessAction::Project { .. } => {
-            eprintln!("katachi: `harness gemini project` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
-        HarnessAction::EffectiveConfig { .. } => {
-            eprintln!("katachi: `harness gemini effective-config` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
+        HarnessAction::DumpRoster { .. } => Ok(crate::exit::emit_not_implemented(
+            global.json,
+            "harness gemini dump-roster",
+        )),
+        HarnessAction::Project { .. } => Ok(crate::exit::emit_not_implemented(
+            global.json,
+            "harness gemini project",
+        )),
+        HarnessAction::EffectiveConfig { .. } => Ok(crate::exit::emit_not_implemented(
+            global.json,
+            "harness gemini effective-config",
+        )),
     }
 }
 
