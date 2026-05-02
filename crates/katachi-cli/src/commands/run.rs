@@ -12,7 +12,8 @@ use serde_json::Value;
 use katachi_core::config;
 use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides};
 use katachi_core::persist::{
-    FILE_MANIFEST, FILE_PLAN, FILE_RECORD, FILE_REQUEST, FILE_TRANSCRIPT, PARTIAL_SUFFIX,
+    RunFileKind, FILE_MANIFEST, FILE_PLAN, FILE_RECORD, FILE_REQUEST, FILE_STDERR, FILE_STDOUT,
+    FILE_TRANSCRIPT, MANIFEST_SCHEMA_VERSION, PARTIAL_SUFFIX,
 };
 use katachi_core::transcript::{EventKind, TranscriptEvent};
 
@@ -57,9 +58,15 @@ fn run_list(global: &GlobalArgs) -> Result<ExitCode> {
 
     let entries = match fs::read_dir(&runs_dir) {
         Ok(it) => it,
-        Err(_) => {
-            emit_runs_list(global, &[]);
-            return Ok(ExitCode::Ok);
+        Err(err) => {
+            emit_run_config_error(
+                global,
+                &format!(
+                    "failed to read runs directory `{}`: {err}",
+                    runs_dir.display()
+                ),
+            );
+            return Ok(ExitCode::Config);
         }
     };
 
@@ -192,10 +199,19 @@ fn run_show(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
         }
     };
 
-    let request = read_optional_json(&path.join(FILE_REQUEST));
-    let plan = read_optional_json(&path.join(FILE_PLAN));
-    let record = read_optional_json(&path.join(FILE_RECORD));
-    let manifest = read_optional_json(&path.join(FILE_MANIFEST));
+    let mut diagnostics = Vec::new();
+    let request = read_json_artifact(&path.join(FILE_REQUEST), FILE_REQUEST, &mut diagnostics);
+    let plan = read_json_artifact(&path.join(FILE_PLAN), FILE_PLAN, &mut diagnostics);
+    let record = read_json_artifact(&path.join(FILE_RECORD), FILE_RECORD, &mut diagnostics);
+    let manifest_path = path.join(FILE_MANIFEST);
+    let manifest = if manifest_path.exists() {
+        read_json_artifact(&manifest_path, FILE_MANIFEST, &mut diagnostics)
+    } else {
+        diagnostics.push(format!(
+            "missing {FILE_MANIFEST}; discovered artifacts from directory"
+        ));
+        discover_manifest(&path, &id, &mut diagnostics)
+    };
 
     let payload = serde_json::json!({
         "run_id": id,
@@ -205,6 +221,7 @@ fn run_show(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
         "plan": plan,
         "record": record,
         "manifest": manifest,
+        "diagnostics": diagnostics,
     });
     if global.json {
         serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
@@ -213,6 +230,14 @@ fn run_show(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
         println!("run_id: {id}");
         println!("state : {state}");
         println!("path  : {}", path.display());
+        if let Some(request) = &request {
+            if let Some(katachi_id) = request.pointer("/katachi_id").and_then(|v| v.as_str()) {
+                println!("request: katachi={katachi_id}");
+            }
+            if let Some(cwd) = request.pointer("/cwd").and_then(|v| v.as_str()) {
+                println!("cwd   : {cwd}");
+            }
+        }
         if let Some(record) = &record {
             if let Some(outcome) = record.pointer("/result/outcome").and_then(|v| v.as_str()) {
                 println!("outcome: {outcome}");
@@ -234,6 +259,12 @@ fn run_show(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
                         println!("  - {p}");
                     }
                 }
+            }
+        }
+        if !diagnostics.is_empty() {
+            println!("diagnostics:");
+            for d in &diagnostics {
+                println!("  {d}");
             }
         }
     }
@@ -439,9 +470,76 @@ fn clipped(text: &str) -> String {
     }
 }
 
-fn read_optional_json(path: &Path) -> Option<Value> {
-    let raw = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+fn read_json_artifact(path: &Path, name: &str, diagnostics: &mut Vec<String>) -> Option<Value> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            diagnostics.push(format!("missing {name}"));
+            return None;
+        }
+        Err(err) => {
+            diagnostics.push(format!("failed to read {name}: {err}"));
+            return None;
+        }
+    };
+    match serde_json::from_str(&raw) {
+        Ok(value) => Some(value),
+        Err(err) => {
+            diagnostics.push(format!("malformed {name}: {err}"));
+            None
+        }
+    }
+}
+
+fn discover_manifest(path: &Path, run_id: &str, diagnostics: &mut Vec<String>) -> Option<Value> {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(err) => {
+            diagnostics.push(format!("failed to discover artifacts: {err}"));
+            return None;
+        }
+    };
+    let mut files = Vec::new();
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if !entry_path.is_file() {
+            continue;
+        }
+        let Some(name) = entry_path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if name == FILE_MANIFEST {
+            continue;
+        }
+        let bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        files.push(serde_json::json!({
+            "path": name,
+            "kind": classify_artifact(name),
+            "bytes": bytes,
+        }));
+    }
+    files.sort_by(|a, b| {
+        a.get("path")
+            .and_then(Value::as_str)
+            .cmp(&b.get("path").and_then(Value::as_str))
+    });
+    Some(serde_json::json!({
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "run_id": run_id,
+        "files": files,
+    }))
+}
+
+fn classify_artifact(name: &str) -> RunFileKind {
+    match name {
+        FILE_REQUEST => RunFileKind::Request,
+        FILE_PLAN => RunFileKind::Plan,
+        FILE_RECORD => RunFileKind::Record,
+        FILE_TRANSCRIPT => RunFileKind::Transcript,
+        FILE_STDOUT => RunFileKind::Stdout,
+        FILE_STDERR => RunFileKind::Stderr,
+        _ => RunFileKind::Other,
+    }
 }
 
 fn runs_dir(global: &GlobalArgs) -> Result<Option<std::path::PathBuf>> {
@@ -487,6 +585,21 @@ fn emit_inconsistent(global: &GlobalArgs, id: &str, committed: &Path, partial: &
         let payload = serde_json::json!({
             "error": {
                 "kind": "resolve",
+                "message": msg,
+            }
+        });
+        let _ = serde_json::to_writer_pretty(std::io::stdout(), &payload);
+        println!();
+    } else {
+        eprintln!("katachi run: {msg}");
+    }
+}
+
+fn emit_run_config_error(global: &GlobalArgs, msg: &str) {
+    if global.json {
+        let payload = serde_json::json!({
+            "error": {
+                "kind": "config",
                 "message": msg,
             }
         });

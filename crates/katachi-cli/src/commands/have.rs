@@ -947,7 +947,7 @@ fn apply_string_array(out: &mut Vec<String>, value: Option<&serde_json::Value>) 
 /// Expand any target with a `roster_id` into projected selectors and a
 /// run-profile overlay. Per docs/remediation/policy-decisions.md §6,
 /// mixing `roster_id` with explicit selectors is an error.
-fn expand_roster_targets(
+pub(crate) fn expand_roster_targets(
     raw: &KatachiDefinition,
     config: &katachi_core::config::KatachiConfig,
     storage: &StoragePaths,

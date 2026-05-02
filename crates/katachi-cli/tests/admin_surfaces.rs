@@ -27,9 +27,21 @@ struct Fx {
 
 impl Fx {
     fn new() -> Self {
+        Self::with_katachis_dir(true)
+    }
+
+    fn without_katachis_dir() -> Self {
+        Self::with_katachis_dir(false)
+    }
+
+    fn with_katachis_dir(create_katachis: bool) -> Self {
         let td = TempDir::new().unwrap();
         let data_root = td.path().join("data");
-        fs::create_dir_all(data_root.join("katachis")).unwrap();
+        if create_katachis {
+            fs::create_dir_all(data_root.join("katachis")).unwrap();
+        } else {
+            fs::create_dir_all(&data_root).unwrap();
+        }
         let config_path = td.path().join("config.toml");
         fs::write(&config_path, "version = 1\n").unwrap();
         Self {
@@ -150,6 +162,28 @@ fn run_list_includes_committed_and_partial() {
 }
 
 #[test]
+fn run_list_malformed_directory_reports_entry_diagnostics() {
+    let fx = Fx::new();
+    let id = "01900000-0000-7000-8000-000000000013";
+    fx.fake_run_dir(id, false);
+
+    let out = fx.run(&["--json", "run", "list"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    let runs = v["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert!(runs[0]["diagnostics"][0]
+        .as_str()
+        .unwrap()
+        .contains("missing record.json"));
+}
+
+#[test]
 fn run_show_committed_returns_record_summary() {
     let fx = Fx::new();
     let id = "01900000-0000-7000-8000-000000000003";
@@ -165,6 +199,33 @@ fn run_show_committed_returns_record_summary() {
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["state"], "committed");
     assert_eq!(v["record"]["result"]["outcome"], "success");
+    assert!(v["diagnostics"].as_array().is_some());
+}
+
+#[test]
+fn run_show_partial_discovers_artifacts_without_manifest() {
+    let fx = Fx::new();
+    let id = "01900000-0000-7000-8000-000000000015";
+    let dir = fx.fake_run_dir(id, true);
+    write_record(&dir, id, "failure");
+
+    let out = fx.run(&["--json", "run", "show", &format!("{id}.partial")]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["state"], "partial");
+    assert_eq!(v["record"]["result"]["outcome"], "failure");
+    let files = v["manifest"]["files"].as_array().unwrap();
+    assert!(files.iter().any(|f| f["path"] == "record.json"));
+    assert!(v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d.as_str().unwrap().contains("missing manifest.json")));
 }
 
 #[test]
@@ -172,6 +233,25 @@ fn run_show_unknown_returns_resolve() {
     let fx = Fx::new();
     let out = fx.run(&["run", "show", "no-such-id"]);
     assert_eq!(out.status.code(), Some(4));
+}
+
+#[test]
+fn run_show_inconsistent_committed_and_partial_returns_resolve() {
+    let fx = Fx::new();
+    let id = "01900000-0000-7000-8000-000000000016";
+    let committed = fx.fake_run_dir(id, false);
+    let partial = fx.fake_run_dir(id, true);
+    write_record(&committed, id, "success");
+    write_record(&partial, id, "failure");
+
+    let out = fx.run(&["--json", "run", "show", id]);
+    assert_eq!(out.status.code(), Some(4));
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert!(v["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("both committed"));
 }
 
 #[test]
@@ -221,6 +301,21 @@ fn run_transcript_human_uses_flat_event_schema_and_keeps_later_events() {
 }
 
 #[test]
+fn run_transcript_inconsistent_committed_and_partial_returns_resolve() {
+    let fx = Fx::new();
+    let id = "01900000-0000-7000-8000-000000000017";
+    let committed = fx.fake_run_dir(id, false);
+    let partial = fx.fake_run_dir(id, true);
+    write_record(&committed, id, "success");
+    write_record(&partial, id, "failure");
+    write_transcript(&committed);
+    write_transcript(&partial);
+
+    let out = fx.run(&["run", "transcript", id]);
+    assert_eq!(out.status.code(), Some(4));
+}
+
+#[test]
 fn katachi_list_empty_when_no_definitions() {
     let fx = Fx::new();
     let out = fx.run(&["katachi", "list"]);
@@ -231,6 +326,24 @@ fn katachi_list_empty_when_no_definitions() {
     );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("(no katachis)"));
+}
+
+#[test]
+fn katachi_list_missing_dir_returns_empty_json_with_diagnostic() {
+    let fx = Fx::without_katachis_dir();
+    let out = fx.run(&["--json", "katachi", "list"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["katachis"].as_array().unwrap().len(), 0);
+    assert!(v["diagnostics"][0]
+        .as_str()
+        .unwrap()
+        .contains("does not exist"));
 }
 
 #[test]
@@ -263,6 +376,11 @@ harness = "codex"
     let katachis = v["katachis"].as_array().unwrap();
     let ids: Vec<&str> = katachis.iter().map(|k| k["id"].as_str().unwrap()).collect();
     assert_eq!(ids, vec!["alpha", "zeta"]);
+    assert!(katachis[0]["source_path"]
+        .as_str()
+        .unwrap()
+        .ends_with("alpha.toml"));
+    assert_eq!(katachis[0]["target_details"][0]["harness"], "codex");
 }
 
 #[test]
@@ -287,6 +405,15 @@ harness = "claude"
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["id"], "demo");
     assert_eq!(v["description"], "test");
+    assert!(v["source_path"].as_str().unwrap().ends_with("demo.toml"));
+    assert_eq!(v["targets"][0]["harness"], "claude");
+}
+
+#[test]
+fn katachi_show_missing_dir_returns_resolve() {
+    let fx = Fx::without_katachis_dir();
+    let out = fx.run(&["katachi", "show", "demo"]);
+    assert_eq!(out.status.code(), Some(4));
 }
 
 #[test]
@@ -294,6 +421,30 @@ fn katachi_show_unknown_returns_resolve() {
     let fx = Fx::new();
     let out = fx.run(&["katachi", "show", "no-such-id"]);
     assert_eq!(out.status.code(), Some(4));
+}
+
+#[test]
+fn katachi_duplicate_ids_return_config() {
+    let fx = Fx::new();
+    fx.write_katachi(
+        "one",
+        r#"
+id = "dup"
+[[targets]]
+harness = "claude"
+"#,
+    );
+    fx.write_katachi(
+        "two",
+        r#"
+id = "dup"
+[[targets]]
+harness = "codex"
+"#,
+    );
+
+    let out = fx.run(&["katachi", "list"]);
+    assert_eq!(out.status.code(), Some(3));
 }
 
 #[test]
@@ -319,4 +470,199 @@ item_ref = { harness = "claude", kind = "plugin", id = "does-not-exist" }
         "expected ExitCode::Resolve (4) or Validate (5); got {code}; stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+#[test]
+fn katachi_validate_missing_roster_id_returns_resolve() {
+    let fx = Fx::new();
+    fx.write_katachi(
+        "missing-roster",
+        r#"
+id = "missing-roster"
+[[targets]]
+harness = "claude"
+roster_id = "does-not-exist"
+"#,
+    );
+    let out = fx.run(&["katachi", "validate", "missing-roster"]);
+    assert_eq!(out.status.code(), Some(4));
+}
+
+#[test]
+fn katachi_validate_empty_roster_id_returns_resolve() {
+    let fx = Fx::new();
+    fx.write_katachi(
+        "empty-roster",
+        r#"
+id = "empty-roster"
+[[targets]]
+harness = "claude"
+roster_id = ""
+"#,
+    );
+    let out = fx.run(&["katachi", "validate", "empty-roster"]);
+    assert_eq!(out.status.code(), Some(4));
+}
+
+#[test]
+fn katachi_validate_roster_id_plus_selectors_returns_resolve() {
+    let fx = Fx::new();
+    fx.write_katachi(
+        "mixed-roster",
+        r#"
+id = "mixed-roster"
+[[targets]]
+harness = "claude"
+roster_id = "demo"
+
+[[targets.selectors.selectors]]
+type = "glob"
+kind = "plugin"
+pattern = "*"
+"#,
+    );
+    let out = fx.run(&["katachi", "validate", "mixed-roster"]);
+    assert_eq!(out.status.code(), Some(4));
+}
+
+#[test]
+fn katachi_validate_honors_cwd_for_discovery() {
+    let fx = Fx::new();
+    let project = fx.data_root.join("project");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("AGENTS.md"), "project instructions").unwrap();
+    let item_id = format!("project:{}/AGENTS.md", project.display());
+    fx.write_katachi(
+        "cwd-doc",
+        &format!(
+            r#"
+id = "cwd-doc"
+[[targets]]
+harness = "codex"
+
+[[targets.selectors.selectors]]
+type = "item_ref"
+item_ref = {{ harness = "codex", kind = "instruction_doc", id = "{item_id}" }}
+"#
+        ),
+    );
+
+    let out = fx.run(&[
+        "--cwd",
+        project.to_str().unwrap(),
+        "--json",
+        "katachi",
+        "validate",
+        "cwd-doc",
+    ]);
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["harness"], "codex");
+    assert!(v["resolved_diagnostics"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn katachi_validate_codex_legality_violation_returns_validate() {
+    let fx = Fx::new();
+    fx.write_katachi(
+        "codex-sdk-py",
+        r#"
+id = "codex-sdk-py"
+[[targets]]
+harness = "codex"
+backend = "sdk-py"
+"#,
+    );
+    let out = fx.run(&["--json", "katachi", "validate", "codex-sdk-py"]);
+    assert_eq!(out.status.code(), Some(5));
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert!(v["validator_diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "codex.legality.backend"));
+}
+
+#[test]
+fn katachi_validate_gemini_policy_violation_returns_validate() {
+    let fx = Fx::new();
+    let project = fx.data_root.join("gemini-project");
+    let home = fx.data_root.join("gemini-home");
+    let ext_root = home.join("extensions");
+    fs::create_dir_all(project.join(".gemini")).unwrap();
+    fs::create_dir_all(ext_root.join("workspace-a11y")).unwrap();
+    fs::write(
+        fx.config_path.clone(),
+        format!(
+            r#"
+version = 1
+
+[harnesses.gemini]
+enabled = true
+home = "{}"
+user_roots = ["{}"]
+project_roots = ["{}"]
+extension_roots = ["{}"]
+"#,
+            home.display(),
+            home.display(),
+            project.display(),
+            ext_root.display(),
+        ),
+    )
+    .unwrap();
+    fs::write(
+        project.join(".gemini/settings.json"),
+        r#"{"security":{"disableExtensions":true}}"#,
+    )
+    .unwrap();
+    fs::write(
+        ext_root
+            .join("workspace-a11y")
+            .join("gemini-extension.json"),
+        r#"{"name":"workspace-a11y","version":"0.1.0"}"#,
+    )
+    .unwrap();
+    fx.write_katachi(
+        "gemini-policy",
+        r#"
+id = "gemini-policy"
+[[targets]]
+harness = "gemini"
+
+[[targets.selectors.selectors]]
+type = "item_ref"
+item_ref = { harness = "gemini", kind = "extension", id = "workspace-a11y" }
+"#,
+    );
+
+    let out = fx.run(&[
+        "--cwd",
+        project.to_str().unwrap(),
+        "--json",
+        "katachi",
+        "validate",
+        "gemini-policy",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(5),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert!(v["validator_diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "gemini.policy.extensions-disabled"));
 }
