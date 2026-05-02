@@ -123,6 +123,11 @@ impl ClaudeConfig {
                 .map(|p| expand_tilde(p, &home))
                 .collect();
             self.user_root = expand_tilde(&self.user_root, &home);
+            self.project_roots = self
+                .project_roots
+                .iter()
+                .map(|p| expand_tilde(p, &home))
+                .collect();
             if let Some(dir) = &self.roster_dir_override {
                 self.roster_dir_override = Some(expand_tilde(dir, &home));
             }
@@ -198,5 +203,27 @@ mod tests {
             "tilde should be expanded, got `{}`",
             c.user_root
         );
+    }
+
+    #[test]
+    fn tilde_expansion_normalizes_project_roots() {
+        let mut c = ClaudeConfig::default();
+        c.project_roots = vec![Utf8PathBuf::from("~/repo")];
+        c.expand_home();
+        if dirs::home_dir().is_some() {
+            assert!(
+                !c.project_roots[0].as_str().starts_with('~'),
+                "project_roots tilde must be expanded, got `{}`",
+                c.project_roots[0]
+            );
+        }
+    }
+
+    #[test]
+    fn tilde_expansion_leaves_relative_paths_unchanged() {
+        let mut c = ClaudeConfig::default();
+        c.project_roots = vec![Utf8PathBuf::from(".")];
+        c.expand_home();
+        assert_eq!(c.project_roots[0], Utf8PathBuf::from("."));
     }
 }

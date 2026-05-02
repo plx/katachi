@@ -49,18 +49,14 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
         HarnessAction::Execute { roster_id, prompt } => run_execute(global, &roster_id, &prompt),
         HarnessAction::Doctor => run_doctor(global),
         HarnessAction::DumpSettings { roster_id } => run_dump_settings(global, &roster_id),
-        HarnessAction::DumpRoster { .. } => Ok(crate::exit::emit_not_implemented(
-            global.json,
-            "harness gemini dump-roster",
-        )),
+        HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, &roster_id),
         HarnessAction::Project { .. } => Ok(crate::exit::emit_not_implemented(
             global.json,
             "harness gemini project",
         )),
-        HarnessAction::EffectiveConfig { .. } => Ok(crate::exit::emit_not_implemented(
-            global.json,
-            "harness gemini effective-config",
-        )),
+        HarnessAction::EffectiveConfig { roster_id } => {
+            run_effective_config(global, &roster_id)
+        }
     }
 }
 
@@ -783,6 +779,123 @@ fn roster_materialization_mode(value: &str) -> Option<CoreMatMode> {
         "temp-overlay" => Some(CoreMatMode::TempOverlay),
         _ => None,
     }
+}
+
+// ---------------- dump-roster ----------------
+
+pub fn run_dump_roster(global: &GlobalArgs, roster_id: &str) -> Result<ExitCode> {
+    let ctx = load_ctx(global)?;
+    let roster_store = load_rosters(&ctx)?;
+    let roster = match roster_store.find(roster_id) {
+        Some(r) => r.clone(),
+        None => {
+            eprintln!(
+                "katachi harness gemini dump-roster: roster `{}` not found under {}",
+                roster_id,
+                rosters_dir(&ctx).display()
+            );
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let definition = roster.to_katachi_definition();
+    let payload = serde_json::json!({
+        "roster": &roster,
+        "projected_definition": &definition,
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", roster.id);
+        if let Some(desc) = &roster.description {
+            println!("description: {desc}");
+        }
+        println!("targets ({}):", definition.targets.len());
+        for t in &definition.targets {
+            println!("  - harness={} backend={:?}", t.harness, t.backend);
+        }
+    }
+    Ok(ExitCode::Ok)
+}
+
+// ---------------- effective-config ----------------
+
+pub fn run_effective_config(global: &GlobalArgs, roster_id: &str) -> Result<ExitCode> {
+    let ctx = load_ctx(global)?;
+    let harness = GeminiHarness::new();
+    let roster_store = load_rosters(&ctx)?;
+    let roster = match roster_store.find(roster_id) {
+        Some(r) => r.clone(),
+        None => {
+            eprintln!(
+                "katachi harness gemini effective-config: roster `{}` not found under {}",
+                roster_id,
+                rosters_dir(&ctx).display()
+            );
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let definition = roster.to_katachi_definition();
+    let req = build_request_for_roster(global, &roster, ctx.cwd.clone(), "");
+    let modules: Vec<&dyn HarnessModule> = vec![&harness];
+    let inputs = ResolveInputs::new(
+        &req,
+        &definition,
+        &modules,
+        &ctx.config,
+        &ctx.storage,
+        &ctx.cwd,
+    );
+    let out = match resolve(inputs) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("katachi harness gemini effective-config: {e}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let policy = ResolvedPolicy::from_catalog(&out.catalog);
+    let plan_ctx = PlanContext {
+        request: &req,
+        resolved: &out.resolved,
+        run_id: RunId::new(),
+    };
+    let plan = harness.plan(&plan_ctx).ok();
+    let payload = serde_json::json!({
+        "roster": roster_id,
+        "harness": "gemini",
+        "backend": out.resolved.backend,
+        "materialization": req.materialization,
+        "policy": {
+            "extensions_disabled": policy.extensions_disabled,
+            "allowed_extensions": &policy.allowed_extensions,
+            "blocked_extensions": &policy.blocked_extensions,
+            "mcp_disabled": policy.mcp_disabled,
+            "forbidden_approval_modes": &policy.forbidden_approval_modes,
+            "preview_features_enabled": policy.preview_features_enabled,
+        },
+        "selected_items": out.resolved.selected_items.iter().map(|i| i.item.to_string()).collect::<Vec<_>>(),
+        "plan_argv": plan.as_ref().map(|p| p.execution.argv.clone()).unwrap_or_default(),
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {roster_id}");
+        println!("backend: {}", out.resolved.backend);
+        println!("materialization: {:?}", req.materialization);
+        println!(
+            "extensions_disabled: {} (preview opt-in: {})",
+            policy.extensions_disabled, policy.preview_features_enabled
+        );
+        println!("selected items: {}", out.resolved.selected_items.len());
+        if let Some(plan) = &plan {
+            println!("argv:");
+            for a in &plan.execution.argv {
+                println!("  {a}");
+            }
+        }
+    }
+    Ok(ExitCode::Ok)
 }
 
 // ---------------- doctor ----------------

@@ -47,14 +47,12 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
         HarnessAction::Doctor => run_doctor(global, &ctx),
         HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, &ctx, &roster_id),
         HarnessAction::Project { roster_id, sdk } => run_project(global, &ctx, &roster_id, sdk),
-        HarnessAction::DumpSettings { .. } => Ok(crate::exit::emit_not_implemented(
-            global.json,
-            "harness claude dump-settings",
-        )),
-        HarnessAction::EffectiveConfig { .. } => Ok(crate::exit::emit_not_implemented(
-            global.json,
-            "harness claude effective-config",
-        )),
+        HarnessAction::DumpSettings { roster_id } => {
+            run_dump_settings(global, &ctx, &roster_id)
+        }
+        HarnessAction::EffectiveConfig { roster_id } => {
+            run_effective_config(global, &ctx, &roster_id)
+        }
     }
 }
 
@@ -141,6 +139,125 @@ fn run_doctor(global: &GlobalArgs, ctx: &ClaudeCtx) -> Result<ExitCode> {
     } else {
         Ok(ExitCode::Ok)
     }
+}
+
+fn run_dump_settings(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> Result<ExitCode> {
+    let (resolved, _) = match resolve_for_roster(global, ctx, roster_id) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("katachi harness claude dump-settings: {err:#}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let plan = match build_plan_from_resolved(global, ctx, &resolved, None) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("katachi harness claude dump-settings: {err:#}");
+            return Ok(ExitCode::Plan);
+        }
+    };
+    let settings_files: Vec<_> = plan
+        .materialization
+        .files
+        .iter()
+        .filter(|f| {
+            f.dest.as_str().ends_with("settings.json")
+                || f.dest.as_str().ends_with("mcp.json")
+        })
+        .map(|f| serde_json::json!({ "target": f.dest.to_string() }))
+        .collect();
+    let payload = serde_json::json!({
+        "roster": resolved.roster.id,
+        "model": resolved.roster.run_profile.model,
+        "permission_mode": resolved.roster.run_profile.permission_mode,
+        "output_format": resolved.roster.run_profile.output_format,
+        "allowed_tools": resolved.roster.run_profile.allowed_tools,
+        "disallowed_tools": resolved.roster.run_profile.disallowed_tools,
+        "setting_sources": resolved.roster.run_profile.setting_sources,
+        "overlay_files": settings_files,
+        "argv": plan.execution.argv,
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", resolved.roster.id);
+        if let Some(m) = &resolved.roster.run_profile.model {
+            println!("model: {m}");
+        }
+        if let Some(pm) = &resolved.roster.run_profile.permission_mode {
+            println!("permission_mode: {pm}");
+        }
+        if !resolved.roster.run_profile.allowed_tools.is_empty() {
+            println!("allowed_tools: {:?}", resolved.roster.run_profile.allowed_tools);
+        }
+        if !resolved.roster.run_profile.disallowed_tools.is_empty() {
+            println!(
+                "disallowed_tools: {:?}",
+                resolved.roster.run_profile.disallowed_tools
+            );
+        }
+        println!("settings/mcp overlay files: {}", settings_files.len());
+    }
+    Ok(ExitCode::Ok)
+}
+
+fn run_effective_config(
+    global: &GlobalArgs,
+    ctx: &ClaudeCtx,
+    roster_id: &str,
+) -> Result<ExitCode> {
+    let (resolved, _) = match resolve_for_roster(global, ctx, roster_id) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("katachi harness claude effective-config: {err:#}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let plan = match build_plan_from_resolved(global, ctx, &resolved, None) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("katachi harness claude effective-config: {err:#}");
+            return Ok(ExitCode::Plan);
+        }
+    };
+    let payload = serde_json::json!({
+        "roster": resolved.roster.id,
+        "harness": plan.harness,
+        "backend": plan.backend,
+        "materialization": {
+            "mode": format!("{:?}", plan.materialization.mode),
+            "files": plan.materialization.files.len(),
+            "overlay_root": plan.materialization.overlay_root,
+        },
+        "model": resolved.roster.run_profile.model,
+        "permission_mode": resolved.roster.run_profile.permission_mode,
+        "output_format": resolved.roster.run_profile.output_format,
+        "allowed_tools": resolved.roster.run_profile.allowed_tools,
+        "disallowed_tools": resolved.roster.run_profile.disallowed_tools,
+        "argv": plan.execution.argv,
+        "env": plan.execution.env,
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", resolved.roster.id);
+        println!("backend: {} ({})", plan.backend, plan.harness);
+        println!(
+            "materialization: {:?} ({} file(s))",
+            plan.materialization.mode,
+            plan.materialization.files.len()
+        );
+        if let Some(m) = &resolved.roster.run_profile.model {
+            println!("model: {m}");
+        }
+        println!("argv:");
+        for a in &plan.execution.argv {
+            println!("  {a}");
+        }
+    }
+    Ok(ExitCode::Ok)
 }
 
 fn run_dump_roster(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> Result<ExitCode> {

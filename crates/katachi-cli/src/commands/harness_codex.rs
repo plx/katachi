@@ -38,14 +38,8 @@ pub fn dispatch(global: &GlobalArgs, cmd: &HarnessCmd) -> Result<ExitCode> {
         HarnessAction::Execute { roster_id, prompt } => {
             run_execute(global, roster_id, prompt)
         }
-        HarnessAction::DumpSettings { .. } => Ok(crate::exit::emit_not_implemented(
-            global.json,
-            "harness codex dump-settings",
-        )),
-        HarnessAction::DumpRoster { .. } => Ok(crate::exit::emit_not_implemented(
-            global.json,
-            "harness codex dump-roster",
-        )),
+        HarnessAction::DumpSettings { roster_id } => run_dump_settings(global, roster_id),
+        HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, roster_id),
         HarnessAction::Project { .. } => Ok(crate::exit::emit_not_implemented(
             global.json,
             "harness codex project",
@@ -120,6 +114,69 @@ pub fn run_effective_config(global: &GlobalArgs, roster_id: &str) -> Result<Exit
     Ok(ExitCode::Ok)
 }
 
+pub fn run_dump_roster(global: &GlobalArgs, roster_id: &str) -> Result<ExitCode> {
+    let bundle = build_bundle(global, roster_id)?;
+    let payload = serde_json::json!({
+        "roster": &bundle.roster,
+        "effective": &bundle.effective,
+        "validation": &bundle.validation,
+        "selected": bundle
+            .resolved_items
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", bundle.roster.id);
+        if let Some(desc) = &bundle.roster.description {
+            println!("description: {desc}");
+        }
+        println!("selected items: {}", bundle.resolved_items.len());
+        for item in &bundle.resolved_items {
+            println!("  - {item}");
+        }
+        if !bundle.validation.is_empty() {
+            println!();
+            println!("validation:");
+            for d in &bundle.validation {
+                println!("  [{:?}] {}: {}", d.severity, d.code, d.message);
+            }
+        }
+    }
+    if any_error(&bundle.validation) {
+        return Ok(ExitCode::Validate);
+    }
+    Ok(ExitCode::Ok)
+}
+
+pub fn run_dump_settings(global: &GlobalArgs, roster_id: &str) -> Result<ExitCode> {
+    // For Codex, the layered effective config IS the dump-settings view.
+    // We report the layer order plus the merged policy.
+    let bundle = build_bundle(global, roster_id)?;
+    let payload = serde_json::json!({
+        "roster": bundle.roster.id,
+        "layer_order": bundle.effective.layer_order,
+        "active_profile": bundle.effective.active_profile,
+        "policy": bundle.effective.policy,
+        "mcp_servers": bundle.effective.mcp_servers.keys().collect::<Vec<_>>(),
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", bundle.roster.id);
+        println!("layer order: {:?}", bundle.effective.layer_order);
+        println!("active profile: {:?}", bundle.effective.active_profile);
+        println!("policy.approval: {:?}", bundle.effective.policy.approval_policy);
+        println!("policy.sandbox:  {:?}", bundle.effective.policy.sandbox_mode);
+        println!("policy.model:    {:?}", bundle.effective.policy.model);
+    }
+    Ok(ExitCode::Ok)
+}
+
 pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
     let ctx = prepare(global)?;
     let settings = ctx.settings.clone();
@@ -140,6 +197,12 @@ pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
         println!();
     } else {
         report.render_human();
+    }
+    // Per docs/remediation/policy-decisions.md §3 (and Plan 7 §4.5):
+    // per-harness doctor must surface a missing binary as ExitCode::Config
+    // because the user explicitly asked about that harness.
+    if !report.binary_on_path {
+        return Ok(ExitCode::Config);
     }
     Ok(ExitCode::Ok)
 }
