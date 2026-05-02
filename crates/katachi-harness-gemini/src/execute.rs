@@ -23,7 +23,16 @@ use katachi_core::transcript::{EventKind, TranscriptEvent};
 use crate::transcript as gemini_transcript;
 
 pub fn run(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> {
-    let record = execute::run(ctx)?;
+    let normalizer: Box<dyn Fn(&str) -> EventKind + Send + Sync> = Box::new(|line| {
+        let mut events = gemini_transcript::parse_line(line);
+        if events.is_empty() {
+            return EventKind::StdoutText {
+                text: line.to_string(),
+            };
+        }
+        events.remove(0)
+    });
+    let record = execute::run_with_normalizer(ctx, Some(normalizer.as_ref()))?;
     // Only produce the Gemini sidecar if the plan was configured for
     // JSON streaming in the first place. Raw-only runs have nothing
     // gemini-specific to project.

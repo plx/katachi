@@ -141,6 +141,61 @@ fn scan_finds_loose_skill_and_agent() {
 }
 
 #[test]
+fn scan_finds_loose_output_styles_and_duplicates() {
+    let fx = Fixture::new();
+    write(&fx.root, ".claude/output-styles/brief.md", "project style");
+    write(
+        &fx.root,
+        "no-user-root/output-styles/brief.md",
+        "user style",
+    );
+
+    let out = fx.run(&["--json", "harness", "claude", "scan"]);
+    assert_success(&out, "scan");
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    let items = v["items"].as_array().unwrap();
+    assert!(items.iter().any(
+        |item| item["item_ref"]["kind"] == "output_style" && item["item_ref"]["id"] == "brief"
+    ));
+    assert!(v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "claude.duplicate-output-style"));
+}
+
+#[test]
+fn roster_can_select_loose_output_style() {
+    let fx = Fixture::new();
+    write(&fx.root, ".claude/output-styles/brief.md", "project style");
+    write(
+        &fx.root,
+        "data/rosters/claude/style.toml",
+        r#"
+version = 1
+id = "style"
+
+[selection]
+output_styles = ["brief"]
+
+[run_profile]
+backend = "cli"
+"#,
+    );
+
+    let out = fx.run(&["--json", "harness", "claude", "dump-roster", "style"]);
+    assert_success(&out, "dump-roster");
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert!(v["resolved"]["selected_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["item"]["kind"] == "output_style" && i["item"]["id"] == "brief"));
+}
+
+#[test]
 fn doctor_reports_binary_resolution() {
     let fx = Fixture::new();
     let out = fx.run(&["harness", "claude", "doctor"]);

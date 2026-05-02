@@ -249,6 +249,16 @@ binary = "fake-gemini"
     assert!(run_dir.join("record.json").exists());
     assert!(run_dir.join("transcript.jsonl").exists());
     assert!(run_dir.join("transcript.gemini.jsonl").exists());
+    let transcript = fs::read_to_string(run_dir.join("transcript.jsonl")).unwrap();
+    assert!(
+        transcript.contains(r#""kind":"assistant_message""#),
+        "main transcript should contain normalized assistant message: {transcript}"
+    );
+    let sidecar = fs::read_to_string(run_dir.join("transcript.gemini.jsonl")).unwrap();
+    assert!(
+        sidecar.contains(r#""kind":"assistant_message""#),
+        "sidecar should still contain normalized assistant message: {sidecar}"
+    );
 }
 
 #[test]

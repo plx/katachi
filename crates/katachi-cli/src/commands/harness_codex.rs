@@ -24,7 +24,7 @@ use katachi_harness_codex::projection::analyze as analyze_projection;
 use katachi_harness_codex::roster_file::{load_rosters_dir, CodexRosterFile};
 use katachi_harness_codex::CodexSettings;
 
-use crate::cli::{GlobalArgs, HarnessAction, HarnessCmd, HarnessPlanAction};
+use crate::cli::{GlobalArgs, HarnessAction, HarnessCmd, HarnessPlanAction, SdkTarget};
 use crate::exit::ExitCode;
 
 pub fn dispatch(global: &GlobalArgs, cmd: &HarnessCmd) -> Result<ExitCode> {
@@ -38,10 +38,7 @@ pub fn dispatch(global: &GlobalArgs, cmd: &HarnessCmd) -> Result<ExitCode> {
         HarnessAction::Execute { roster_id, prompt } => run_execute(global, roster_id, prompt),
         HarnessAction::DumpSettings { roster_id } => run_dump_settings(global, roster_id),
         HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, roster_id),
-        HarnessAction::Project { .. } => Ok(crate::exit::emit_not_implemented(
-            global.json,
-            "harness codex project",
-        )),
+        HarnessAction::Project { roster_id, sdk } => run_project(global, roster_id, *sdk),
     }
 }
 
@@ -176,6 +173,107 @@ pub fn run_dump_settings(global: &GlobalArgs, roster_id: &str) -> Result<ExitCod
         println!("policy.model:    {:?}", bundle.effective.policy.model);
     }
     Ok(ExitCode::Ok)
+}
+
+pub fn run_project(global: &GlobalArgs, roster_id: &str, sdk: SdkTarget) -> Result<ExitCode> {
+    let mut bundle = build_bundle(global, roster_id)?;
+    bundle.backend = match sdk {
+        SdkTarget::Ts => BackendKind::SdkTs,
+        SdkTarget::Py => BackendKind::SdkPy,
+    };
+    let projection = analyze_projection(
+        bundle.backend,
+        &bundle.roster,
+        &bundle.effective,
+        &bundle.settings,
+    );
+    let blocking_projection = any_error(&projection);
+    let planned = if blocking_projection {
+        None
+    } else {
+        Some(plan_with_bundle(&bundle, String::new(), global)?)
+    };
+    let code = match sdk {
+        SdkTarget::Ts => codex_ts_project_code(&bundle),
+        SdkTarget::Py => codex_py_project_code(&bundle),
+    };
+    let payload = serde_json::json!({
+        "roster": &bundle.roster.id,
+        "sdk": match sdk { SdkTarget::Ts => "ts", SdkTarget::Py => "py" },
+        "backend": bundle.backend,
+        "code": code,
+        "diagnostics": &projection,
+        "validation": &bundle.validation,
+        "argv": planned.as_ref().map(|p| p.planned.command.clone()).unwrap_or_default(),
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("{}", payload["code"].as_str().unwrap_or(""));
+        let diagnostics = payload["diagnostics"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if !diagnostics.is_empty() {
+            println!();
+            println!("diagnostics:");
+            for d in &diagnostics {
+                if let Some(code) = d.get("code").and_then(|v| v.as_str()) {
+                    let message = d.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    println!("  {code}: {message}");
+                }
+            }
+        }
+    }
+    if any_error(&bundle.validation) {
+        return Ok(ExitCode::Validate);
+    }
+    if blocking_projection {
+        return Ok(ExitCode::Plan);
+    }
+    Ok(ExitCode::Ok)
+}
+
+fn codex_ts_project_code(bundle: &BuiltBundle) -> String {
+    let policy = &bundle.effective.policy;
+    let mut options = serde_json::Map::new();
+    options.insert("prompt".into(), serde_json::json!(""));
+    options.insert("cd".into(), serde_json::json!("."));
+    if let Some(model) = &policy.model {
+        options.insert("model".into(), serde_json::json!(model));
+    }
+    if let Some(profile) = &policy.profile {
+        options.insert("profile".into(), serde_json::json!(profile));
+    }
+    if let Some(approval) = &policy.approval_policy {
+        options.insert("approvalPolicy".into(), serde_json::json!(approval));
+    }
+    if let Some(sandbox) = &policy.sandbox_mode {
+        options.insert("sandboxMode".into(), serde_json::json!(sandbox));
+    }
+    format!(
+        "import {{ run }} from '@openai/codex-sdk';\n\nawait run({});\n",
+        serde_json::to_string_pretty(&serde_json::Value::Object(options)).unwrap_or_default()
+    )
+}
+
+fn codex_py_project_code(bundle: &BuiltBundle) -> String {
+    let policy = &bundle.effective.policy;
+    let mut kwargs = vec!["prompt=\"\"".to_string(), "cd=\".\"".to_string()];
+    if let Some(model) = &policy.model {
+        kwargs.push(format!("model={model:?}"));
+    }
+    if let Some(profile) = &policy.profile {
+        kwargs.push(format!("profile={profile:?}"));
+    }
+    if let Some(approval) = &policy.approval_policy {
+        kwargs.push(format!("approval_policy={approval:?}"));
+    }
+    if let Some(sandbox) = &policy.sandbox_mode {
+        kwargs.push(format!("sandbox_mode={sandbox:?}"));
+    }
+    format!("from codex_sdk import run\n\nrun({})\n", kwargs.join(", "))
 }
 
 pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {

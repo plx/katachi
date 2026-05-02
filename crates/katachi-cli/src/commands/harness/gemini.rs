@@ -33,7 +33,9 @@ use katachi_harness_gemini::scan;
 use katachi_harness_gemini::validate::gemini_validators;
 use katachi_harness_gemini::GeminiHarness;
 
-use crate::cli::{GlobalArgs, GraphFormat, HarnessAction, HarnessPlanAction, MaterializationArg};
+use crate::cli::{
+    GlobalArgs, GraphFormat, HarnessAction, HarnessPlanAction, MaterializationArg, SdkTarget,
+};
 use crate::exit::ExitCode;
 
 /// Dispatch an action on the gemini harness.
@@ -50,10 +52,7 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
         HarnessAction::Doctor => run_doctor(global),
         HarnessAction::DumpSettings { roster_id } => run_dump_settings(global, &roster_id),
         HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, &roster_id),
-        HarnessAction::Project { .. } => Ok(crate::exit::emit_not_implemented(
-            global.json,
-            "harness gemini project",
-        )),
+        HarnessAction::Project { roster_id, sdk } => run_project(global, &roster_id, sdk),
         HarnessAction::EffectiveConfig { roster_id } => run_effective_config(global, &roster_id),
     }
 }
@@ -829,6 +828,126 @@ pub fn run_dump_roster(global: &GlobalArgs, roster_id: &str) -> Result<ExitCode>
         }
     }
     Ok(ExitCode::Ok)
+}
+
+// ---------------- project ----------------
+
+pub fn run_project(global: &GlobalArgs, roster_id: &str, sdk: SdkTarget) -> Result<ExitCode> {
+    let backend = match sdk {
+        SdkTarget::Ts => BackendKind::SdkTs,
+        SdkTarget::Py => BackendKind::SdkPy,
+    };
+    let ctx = load_ctx(global)?;
+    let harness = GeminiHarness::new();
+    let roster_store = load_rosters(&ctx)?;
+    let roster = match roster_store.find(roster_id) {
+        Some(r) => r.clone(),
+        None => {
+            eprintln!(
+                "katachi harness gemini project: roster `{}` not found under {}",
+                roster_id,
+                rosters_dir(&ctx).display()
+            );
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let mut definition = roster.to_katachi_definition();
+    if let Some(target) = definition.targets.first_mut() {
+        target.backend = Some(backend);
+    }
+    let mut req = build_request_for_roster(global, &roster, ctx.cwd.clone(), "");
+    req.preferred_backends = vec![backend];
+    let modules: Vec<&dyn HarnessModule> = vec![&harness];
+    let out = match resolve(ResolveInputs::new(
+        &req,
+        &definition,
+        &modules,
+        &ctx.config,
+        &ctx.storage,
+        &ctx.cwd,
+    )) {
+        Ok(out) => out,
+        Err(err) => {
+            eprintln!("katachi harness gemini project: {err}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let policy = ResolvedPolicy::from_catalog(&out.catalog);
+    let mut validators = default_validators();
+    validators.extend(gemini_validators(policy));
+    let validator_diags = run_validators(
+        &ValidateContext {
+            resolved: &out.resolved,
+            catalog: &out.catalog,
+            definition: &definition,
+        },
+        &validators,
+    );
+    let plan_ctx = PlanContext {
+        request: &req,
+        resolved: &out.resolved,
+        run_id: RunId::new(),
+    };
+    let plan = harness.plan(&plan_ctx);
+    let (code, plan_argv, plan_diag) = match plan {
+        Ok(plan) => (
+            gemini_project_code(&plan),
+            plan.execution.argv.clone(),
+            Vec::<Diagnostic>::new(),
+        ),
+        Err(err) => (
+            gemini_project_code_for_error(backend),
+            Vec::new(),
+            vec![Diagnostic::error(
+                "gemini.project.projection",
+                err.to_string(),
+            )],
+        ),
+    };
+    let payload = serde_json::json!({
+        "roster": roster_id,
+        "sdk": match sdk { SdkTarget::Ts => "ts", SdkTarget::Py => "py" },
+        "backend": backend,
+        "code": code,
+        "plan_argv": plan_argv,
+        "validator_diagnostics": &validator_diags,
+        "diagnostics": &plan_diag,
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("{}", payload["code"].as_str().unwrap_or(""));
+        for d in validator_diags.iter().chain(plan_diag.iter()) {
+            println!("  [{:?}] {}: {}", d.severity, d.code, d.message);
+        }
+    }
+    if any_error(&validator_diags) || any_error(&plan_diag) {
+        return Ok(ExitCode::Plan);
+    }
+    Ok(ExitCode::Ok)
+}
+
+fn gemini_project_code(plan: &katachi_core::plan::ExecutionPlan) -> String {
+    if plan.backend != BackendKind::SdkTs {
+        return String::new();
+    }
+    let eval = plan
+        .execution
+        .argv
+        .windows(2)
+        .find_map(|w| (w[0] == "-e").then(|| w[1].clone()))
+        .unwrap_or_else(|| "require('@google/gemini-cli-sdk').run({});".into());
+    format!(
+        "import {{ run }} from '@google/gemini-cli-sdk';\n\n// Advisory projection from katachi.\n{eval}\n"
+    )
+}
+
+fn gemini_project_code_for_error(backend: BackendKind) -> String {
+    match backend {
+        BackendKind::SdkPy => "# Gemini Python SDK projection is unsupported.\n".into(),
+        _ => String::new(),
+    }
 }
 
 // ---------------- effective-config ----------------

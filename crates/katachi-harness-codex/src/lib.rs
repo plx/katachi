@@ -30,6 +30,7 @@ pub mod roster_file;
 pub mod rules;
 pub mod runtime;
 pub mod skills;
+pub mod transcript;
 
 pub use harness::CodexHarness;
 pub use items::{CodexEdgeKind, CodexItemKind};

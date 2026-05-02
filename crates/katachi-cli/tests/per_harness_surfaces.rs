@@ -254,6 +254,59 @@ fn codex_dump_settings_emits_layer_order() {
 }
 
 #[test]
+fn codex_project_ts_emits_advisory_code() {
+    let fx = CodexFx::new();
+    let out = fx.run(&[
+        "--json", "harness", "codex", "project", "audit", "--sdk", "ts",
+    ]);
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["backend"], "sdk-ts");
+    assert!(v["code"].as_str().unwrap().contains("@openai/codex-sdk"));
+}
+
+#[test]
+fn codex_project_py_disabled_exits_plan() {
+    let fx = CodexFx::new();
+    let out = fx.run(&[
+        "--json", "harness", "codex", "project", "audit", "--sdk", "py",
+    ]);
+    assert_eq!(out.status.code(), Some(6));
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert!(v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "codex.projection.sdk-py.disabled"));
+}
+
+#[test]
+fn codex_project_py_enabled_emits_advisory_code() {
+    let fx = CodexFx::new();
+    let config_path = fx.workdir.join("config.toml");
+    let body = fs::read_to_string(&config_path).unwrap();
+    fs::write(&config_path, format!("{body}\nenable_python_sdk = true\n")).unwrap();
+    let out = fx.run(&[
+        "--json", "harness", "codex", "project", "audit", "--sdk", "py",
+    ]);
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["backend"], "sdk-py");
+    assert!(v["code"].as_str().unwrap().contains("codex_sdk"));
+}
+
+#[test]
 fn codex_doctor_returns_config_when_binary_missing() {
     let td = TempDir::new().unwrap();
     let workdir = td.path().to_path_buf();
@@ -300,6 +353,7 @@ struct GeminiFx {
     config_path: std::path::PathBuf,
     cwd: std::path::PathBuf,
     fake_dir: std::path::PathBuf,
+    ext_root: std::path::PathBuf,
 }
 
 impl GeminiFx {
@@ -361,6 +415,7 @@ binary = "fake-gemini"
             config_path,
             cwd,
             fake_dir,
+            ext_root,
         }
     }
 
@@ -408,4 +463,75 @@ fn gemini_effective_config_emits_argv() {
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(v["roster"], "demo");
     assert!(v["plan_argv"].is_array());
+}
+
+#[test]
+fn gemini_project_ts_emits_advisory_code() {
+    let fx = GeminiFx::new();
+    let out = fx.run(&[
+        "--json", "harness", "gemini", "project", "demo", "--sdk", "ts",
+    ]);
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["backend"], "sdk-ts");
+    assert!(v["code"]
+        .as_str()
+        .unwrap()
+        .contains("@google/gemini-cli-sdk"));
+}
+
+#[test]
+fn gemini_project_extension_blocks_sdk_ts() {
+    let fx = GeminiFx::new();
+    fs::create_dir_all(fx.ext_root.join("workspace-a11y")).unwrap();
+    fs::write(
+        fx.ext_root
+            .join("workspace-a11y")
+            .join("gemini-extension.json"),
+        r#"{"name":"workspace-a11y","version":"0.1.0"}"#,
+    )
+    .unwrap();
+    fs::write(
+        fx.data_root.join("rosters/gemini/ext.toml"),
+        r#"
+version = 1
+id = "ext"
+
+[selection]
+extensions = ["workspace-a11y"]
+"#,
+    )
+    .unwrap();
+    let out = fx.run(&[
+        "--json", "harness", "gemini", "project", "ext", "--sdk", "ts",
+    ]);
+    assert_eq!(out.status.code(), Some(6));
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert!(v["validator_diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "gemini.projection.sdk-ts-unsupported"));
+}
+
+#[test]
+fn gemini_project_py_exits_plan() {
+    let fx = GeminiFx::new();
+    let out = fx.run(&[
+        "--json", "harness", "gemini", "project", "demo", "--sdk", "py",
+    ]);
+    assert_eq!(out.status.code(), Some(6));
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert!(v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "gemini.project.projection"));
 }

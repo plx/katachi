@@ -21,6 +21,7 @@ pub mod agent;
 pub mod hooks;
 pub mod instruction;
 pub mod mcp;
+pub mod output_style;
 pub mod plugin;
 pub mod skill;
 
@@ -47,6 +48,7 @@ pub fn scan_from_roots(
     instruction::scan_instructions(&mut state, roots)?;
     hooks::scan_hooks(&mut state, roots)?;
     mcp::scan_mcp(&mut state, roots)?;
+    output_style::scan_loose_output_styles(&mut state, roots)?;
 
     Ok(state.finalize())
 }

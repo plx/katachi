@@ -12,7 +12,7 @@ use katachi_core::harness::{ExplainContext, HarnessModule, ScanContext};
 use katachi_core::model::{BackendKind, ItemRef, MaterializationMode};
 use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides};
 use katachi_core::persist::{finalize_run_directory, CommitPolicy, RunDirectory};
-use katachi_core::plan::{ActionRequest, ExecutionPlan, InvocationRequest};
+use katachi_core::plan::{ActionRequest, ExecutionPlan, FileSource, InvocationRequest};
 use katachi_core::record::RunId;
 
 use katachi_harness_claude::config::ClaudeConfig;
@@ -151,14 +151,44 @@ fn run_dump_settings(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> R
             return Ok(ExitCode::Plan);
         }
     };
-    let settings_files: Vec<_> = plan
+    let overlay_files: Vec<_> = plan
         .materialization
         .files
         .iter()
-        .filter(|f| {
-            f.dest.as_str().ends_with("settings.json") || f.dest.as_str().ends_with("mcp.json")
+        .map(|f| {
+            let (source, inline_bytes, inline_json) = match &f.source {
+                FileSource::Inline { contents } => (
+                    "inline",
+                    Some(contents.len()),
+                    serde_json::from_str::<serde_json::Value>(contents).ok(),
+                ),
+                FileSource::CopyFrom { .. } => ("copy_from", None, None),
+                FileSource::SymlinkTo { .. } => ("symlink_to", None, None),
+            };
+            serde_json::json!({
+                "dest": f.dest.to_string(),
+                "source": source,
+                "inline_bytes": inline_bytes,
+                "inline_json": inline_json,
+            })
         })
-        .map(|f| serde_json::json!({ "target": f.dest.to_string() }))
+        .collect();
+    let merged_settings = overlay_files
+        .iter()
+        .find(|f| f["dest"].as_str().unwrap_or("").ends_with("settings.json"))
+        .and_then(|f| f.get("inline_json").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let merged_mcp = overlay_files
+        .iter()
+        .find(|f| f["dest"].as_str().unwrap_or("").ends_with("mcp.json"))
+        .and_then(|f| f.get("inline_json").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let selected_hooks: Vec<_> = resolved
+        .resolved
+        .selected_items
+        .iter()
+        .filter(|i| i.item.kind == "hook_set")
+        .map(|i| i.item.to_string())
         .collect();
     let payload = serde_json::json!({
         "roster": resolved.roster.id,
@@ -168,7 +198,11 @@ fn run_dump_settings(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> R
         "allowed_tools": resolved.roster.run_profile.allowed_tools,
         "disallowed_tools": resolved.roster.run_profile.disallowed_tools,
         "setting_sources": resolved.roster.run_profile.setting_sources,
-        "overlay_files": settings_files,
+        "settings": merged_settings,
+        "mcp": merged_mcp,
+        "selected_hooks": selected_hooks,
+        "overlay_files": overlay_files,
+        "diagnostics": resolved.resolved.diagnostics,
         "argv": plan.execution.argv,
     });
     if global.json {
@@ -194,7 +228,7 @@ fn run_dump_settings(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> R
                 resolved.roster.run_profile.disallowed_tools
             );
         }
-        println!("settings/mcp overlay files: {}", settings_files.len());
+        println!("overlay files: {}", overlay_files.len());
     }
     Ok(ExitCode::Ok)
 }
@@ -214,22 +248,45 @@ fn run_effective_config(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -
             return Ok(ExitCode::Plan);
         }
     };
+    let overlay_files: Vec<_> = plan
+        .materialization
+        .files
+        .iter()
+        .map(|f| {
+            let (source, inline_bytes) = match &f.source {
+                FileSource::Inline { contents } => ("inline", Some(contents.len())),
+                FileSource::CopyFrom { .. } => ("copy_from", None),
+                FileSource::SymlinkTo { .. } => ("symlink_to", None),
+            };
+            serde_json::json!({
+                "dest": f.dest.to_string(),
+                "source": source,
+                "inline_bytes": inline_bytes,
+            })
+        })
+        .collect();
     let payload = serde_json::json!({
         "roster": resolved.roster.id,
         "harness": plan.harness,
         "backend": plan.backend,
         "materialization": {
             "mode": format!("{:?}", plan.materialization.mode),
-            "files": plan.materialization.files.len(),
+            "files": overlay_files,
             "overlay_root": plan.materialization.overlay_root,
+            "env": plan.materialization.env,
         },
         "model": resolved.roster.run_profile.model,
         "permission_mode": resolved.roster.run_profile.permission_mode,
         "output_format": resolved.roster.run_profile.output_format,
         "allowed_tools": resolved.roster.run_profile.allowed_tools,
         "disallowed_tools": resolved.roster.run_profile.disallowed_tools,
+        "system_prompt": resolved.roster.run_profile.system_prompt,
+        "append_system_prompt": resolved.roster.run_profile.append_system_prompt,
+        "timeout_secs": resolved.roster.run_profile.timeout_secs,
         "argv": plan.execution.argv,
         "env": plan.execution.env,
+        "cwd": plan.execution.cwd,
+        "diagnostics": resolved.resolved.diagnostics,
     });
     if global.json {
         serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
