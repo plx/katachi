@@ -945,8 +945,9 @@ fn apply_string_array(out: &mut Vec<String>, value: Option<&serde_json::Value>) 
 }
 
 /// Expand any target with a `roster_id` into projected selectors and a
-/// run-profile overlay. Per docs/remediation/policy-decisions.md §6,
-/// mixing `roster_id` with explicit selectors is an error.
+/// run-profile overlay. Mixing `roster_id` with explicit selectors is a
+/// deliberate resolve-time error because roster expansion already supplies
+/// the target selector set.
 pub(crate) fn expand_roster_targets(
     raw: &KatachiDefinition,
     config: &katachi_core::config::KatachiConfig,
@@ -967,7 +968,7 @@ pub(crate) fn expand_roster_targets(
         if !target.selectors.selectors.is_empty() {
             return Err(format!(
                 "katachi `{}` target {} mixes `roster_id` with explicit selectors; \
-                 this combination is not yet supported (Plan 4 §5)",
+                 roster_id targets must not also declare explicit selectors",
                 raw.id, target.harness
             ));
         }

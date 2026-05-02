@@ -1,9 +1,6 @@
 //! Policy contracts encoded as CLI tests.
 //!
-//! These tests pin down the behaviors documented in
-//! `docs/remediation/policy-decisions.md`. Some of them intentionally
-//! describe the *intended* contract and will fail against the current
-//! implementation — Plan 2 of the remediation makes them pass.
+//! These tests pin down the policy contracts expected by the public docs.
 
 #![cfg(unix)]
 

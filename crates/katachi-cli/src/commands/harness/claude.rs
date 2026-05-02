@@ -478,7 +478,7 @@ fn resolve_backend(
     roster: &katachi_harness_claude::roster::ClaudeRoster,
     claude_config: &ClaudeConfig,
 ) -> BackendKind {
-    // Per docs/remediation/policy-decisions.md §3:
+    // Backend precedence:
     //   roster pin > --prefer-backend > config default > built-in `cli`.
     if let Some(b) = roster.backend() {
         return b;

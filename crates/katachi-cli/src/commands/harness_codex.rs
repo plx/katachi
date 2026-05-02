@@ -297,8 +297,7 @@ pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
     } else {
         report.render_human();
     }
-    // Per docs/remediation/policy-decisions.md §3 (and Plan 7 §4.5):
-    // per-harness doctor must surface a missing binary as ExitCode::Config
+    // Per-harness doctor must surface a missing binary as ExitCode::Config
     // because the user explicitly asked about that harness.
     if !report.binary_on_path {
         return Ok(ExitCode::Config);

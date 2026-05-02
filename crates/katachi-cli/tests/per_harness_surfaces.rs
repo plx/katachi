@@ -1,4 +1,4 @@
-//! Tests for newly-implemented per-harness surfaces in Plan 7:
+//! Tests for newly implemented per-harness debug and projection surfaces:
 //! `harness claude dump-settings`, `harness claude effective-config`,
 //! `harness codex dump-roster`, `harness codex dump-settings`,
 //! `harness gemini dump-roster`, `harness gemini effective-config`.

@@ -21,6 +21,26 @@ fn write(root: &Path, rel: &str, contents: &str) {
     fs::write(path, contents).unwrap();
 }
 
+fn make_executable(path: &Path) {
+    let mut perms = fs::metadata(path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(path, perms).unwrap();
+}
+
+fn run_count(runs_dir: &Path) -> usize {
+    fs::read_dir(runs_dir).map(|r| r.count()).unwrap_or(0)
+}
+
+fn partial_run_count(runs_dir: &Path) -> usize {
+    fs::read_dir(runs_dir)
+        .map(|r| {
+            r.flatten()
+                .filter(|e| e.path().to_string_lossy().ends_with(".partial"))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
 struct Fx {
     _td: TempDir,
     root: std::path::PathBuf,
@@ -56,9 +76,7 @@ sandbox_mode = "read-only"
         .unwrap();
         let fake = root.join("fake-codex.sh");
         fs::write(&fake, "#!/bin/sh\necho FAKE_CODEX_HAVE\nexit 0\n").unwrap();
-        let mut perms = fs::metadata(&fake).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&fake, perms).unwrap();
+        make_executable(&fake);
         let config_path = root.join("config.toml");
         fs::write(
             &config_path,
@@ -152,9 +170,7 @@ impl GeminiFx {
             "#!/bin/sh\necho '{\"type\":\"result\",\"summary\":\"done\",\"outcome\":\"success\"}'\nexit 0\n",
         )
         .unwrap();
-        let mut perms = fs::metadata(&fake).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&fake, perms).unwrap();
+        make_executable(&fake);
         let config_path = root.join("config.toml");
         fs::write(
             &config_path,
@@ -260,9 +276,7 @@ echo '{"type":"result","subtype":"success"}'
 "#,
         )
         .unwrap();
-        let mut perms = fs::metadata(&fake_claude).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&fake_claude, perms).unwrap();
+        make_executable(&fake_claude);
 
         // Claude roster `greet` selects the project skill.
         let claude_roster = root.join("data/rosters/claude/greet.toml");
@@ -384,8 +398,11 @@ fn have_execute_dry_run_does_not_create_a_run_directory() {
         String::from_utf8_lossy(&out.stderr)
     );
     let runs_dir = fx.data_root.join("runs");
-    let count = fs::read_dir(&runs_dir).map(|r| r.count()).unwrap_or(0);
-    assert_eq!(count, 0, "dry-run must not create a run directory");
+    assert_eq!(
+        run_count(&runs_dir),
+        0,
+        "dry-run must not create a run directory"
+    );
 }
 
 #[test]
@@ -410,6 +427,77 @@ item_ref = { harness = "claude", kind = "skill", id = "greeter" }
     assert!(
         out.status.success(),
         "expected selector-only target to execute; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn have_plan_execute_works_for_selector_only_targets() {
+    let claude = Fx::new();
+    fs::write(
+        claude.data_root.join("katachis/raw.toml"),
+        r#"
+id = "raw"
+
+[[targets]]
+harness = "claude"
+
+[[targets.selectors.selectors]]
+type = "item_ref"
+item_ref = { harness = "claude", kind = "skill", id = "greeter" }
+"#,
+    )
+    .unwrap();
+    let out = claude.run(&["have", "raw", "plan", "execute", "hi"]);
+    assert!(
+        out.status.success(),
+        "claude selector plan stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let codex = CodexFx::new();
+    codex.write_katachi(
+        "raw",
+        r#"
+id = "raw"
+
+[[targets]]
+harness = "codex"
+backend = "cli"
+run_profile_overlay = { approval_policy = "never", sandbox_mode = "read-only", model = "gpt-5.4" }
+
+[[targets.selectors.selectors]]
+type = "glob"
+kind = "profile"
+pattern = "*review"
+"#,
+    );
+    let out = codex.run(&["have", "raw", "plan", "execute", "hi"]);
+    assert!(
+        out.status.success(),
+        "codex selector plan stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let gemini = GeminiFx::new();
+    gemini.write_katachi(
+        "raw",
+        r#"
+id = "raw"
+
+[[targets]]
+harness = "gemini"
+backend = "cli"
+run_profile_overlay = { model = "gemini-3-pro", approval_mode = "plan", output_format = "stream-json", binary = "fake-gemini" }
+"#,
+    );
+    let out = gemini.run(&["have", "raw", "plan", "execute", "hi"]);
+    assert!(
+        out.status.success(),
+        "gemini selector plan stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -464,6 +552,118 @@ pattern = "*review"
     );
     let runs = fs::read_dir(fx.data_root.join("runs")).unwrap();
     assert_eq!(runs.count(), 1);
+}
+
+#[test]
+fn have_execute_dry_run_does_not_create_runs_for_codex_or_gemini() {
+    let codex = CodexFx::new();
+    codex.write_katachi(
+        "audit",
+        r#"
+id = "audit"
+
+[[targets]]
+harness = "codex"
+roster_id = "audit"
+"#,
+    );
+    let out = codex.run(&["--dry-run", "have", "audit", "execute", "hi"]);
+    assert!(
+        out.status.success(),
+        "codex dry-run stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(run_count(&codex.data_root.join("runs")), 0);
+
+    let gemini = GeminiFx::new();
+    gemini.write_katachi(
+        "demo",
+        r#"
+id = "demo"
+
+[[targets]]
+harness = "gemini"
+roster_id = "demo"
+"#,
+    );
+    let out = gemini.run(&["--dry-run", "have", "demo", "execute", "hi"]);
+    assert!(
+        out.status.success(),
+        "gemini dry-run stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(run_count(&gemini.data_root.join("runs")), 0);
+}
+
+#[test]
+fn have_execute_child_failures_leave_partial_runs_for_each_harness() {
+    let claude = Fx::new();
+    let fake_claude = claude.root.join("fake-claude");
+    fs::write(&fake_claude, "#!/bin/sh\necho CLAUDE_FAILED 1>&2\nexit 2\n").unwrap();
+    make_executable(&fake_claude);
+    let out = claude.run(&["have", "greet", "execute", "hi"]);
+    assert_eq!(
+        out.status.code(),
+        Some(7),
+        "claude failure stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(partial_run_count(&claude.data_root.join("runs")), 1);
+
+    let codex = CodexFx::new();
+    codex.write_katachi(
+        "audit",
+        r#"
+id = "audit"
+
+[[targets]]
+harness = "codex"
+roster_id = "audit"
+"#,
+    );
+    let fake_codex = codex.root.join("fake-codex.sh");
+    fs::write(&fake_codex, "#!/bin/sh\necho CODEX_FAILED 1>&2\nexit 2\n").unwrap();
+    make_executable(&fake_codex);
+    let out = codex.run(&["have", "audit", "execute", "hi"]);
+    assert_eq!(
+        out.status.code(),
+        Some(7),
+        "codex failure stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(partial_run_count(&codex.data_root.join("runs")), 1);
+
+    let gemini = GeminiFx::new();
+    gemini.write_katachi(
+        "demo",
+        r#"
+id = "demo"
+
+[[targets]]
+harness = "gemini"
+roster_id = "demo"
+"#,
+    );
+    let fake_gemini = gemini.root.join("fake-gemini");
+    fs::write(
+        &fake_gemini,
+        "#!/usr/bin/env bash\necho GEMINI_FAILED 1>&2\nexit 2\n",
+    )
+    .unwrap();
+    make_executable(&fake_gemini);
+    let out = gemini.run(&["have", "demo", "execute", "hi"]);
+    assert_eq!(
+        out.status.code(),
+        Some(7),
+        "gemini failure stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(partial_run_count(&gemini.data_root.join("runs")), 1);
 }
 
 #[test]

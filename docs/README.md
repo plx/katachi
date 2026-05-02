@@ -1,6 +1,7 @@
 # katachi prototype documentation suite
 
-This folder contains a planning-grade markdown suite for building an initial `katachi` prototype.
+This folder contains the design and current-status documentation for the
+initial `katachi` prototype.
 
 `katachi` is a Rust CLI that provides an indirection layer between a **named loadout** (`katachi`) and a **harness-native execution plan** (Claude Code, Codex, Gemini). The design goal is not to flatten these harnesses into one abstract model. The goal is to give coding agents a stable place to discover, resolve, validate, materialize, and execute **harness-native** configurations in a uniform way.
 
@@ -9,10 +10,16 @@ This folder contains a planning-grade markdown suite for building an initial `ka
 1. [01-katachi-conceptual-overview.md](./01-katachi-conceptual-overview.md)
 2. [02-katachi-implementation-overview.md](./02-katachi-implementation-overview.md)
 3. [03-katachi-high-level-implementation-plan.md](./03-katachi-high-level-implementation-plan.md)
-4. Harness-specific docs:
+4. Harness-specific design docs:
    - Claude: [conceptual overview](./claude/01-conceptual-overview.md), [implementation spec](./claude/02-implementation-specification.md), [step-by-step plan](./claude/03-step-by-step-plan.md)
    - Codex: [conceptual overview](./codex/01-conceptual-overview.md), [implementation spec](./codex/02-implementation-specification.md), [step-by-step plan](./codex/03-step-by-step-plan.md)
    - Gemini: [conceptual overview](./gemini/01-conceptual-overview.md), [implementation spec](./gemini/02-implementation-specification.md), [step-by-step plan](./gemini/03-step-by-step-plan.md)
+5. Current-implementation references (basic usage, command status, known
+   limitations, and test/quality-gate notes for the prototype):
+   - [04-cli-usage-and-status.md](./04-cli-usage-and-status.md)
+   - [claude/04-current-implementation.md](./claude/04-current-implementation.md)
+   - [codex/04-current-implementation.md](./codex/04-current-implementation.md)
+   - [gemini/04-current-implementation.md](./gemini/04-current-implementation.md)
 
 ## What this suite is for
 
@@ -39,10 +46,19 @@ It deliberately emphasizes:
 | `01-katachi-conceptual-overview.md` | Core vocabulary, goals, lifecycle, and system-level design constraints |
 | `02-katachi-implementation-overview.md` | Rust workspace, clap command tree, shared data model, planner/executor flow |
 | `03-katachi-high-level-implementation-plan.md` | Shared implementation order and milestones |
-| `claude/*` | Claude Code roster model, CLI/SDK differences, resolver and executor design |
-| `codex/*` | Codex Team Config / AGENTS.md / skills / agents / hooks / rules / plugin design |
-| `gemini/*` | Gemini settings / extensions / hooks / skills / subagents / MCP / policy design |
+| `04-cli-usage-and-status.md` | Top-level CLI usage reference and per-subcommand implementation status (audit aid) |
+| `claude/01..03-*.md` | Claude Code roster model, CLI/SDK differences, resolver and executor design |
+| `claude/04-current-implementation.md` | What the Claude harness actually does today (config, roster, scan, plan, execute) |
+| `codex/01..03-*.md` | Codex Team Config / AGENTS.md / skills / agents / hooks / rules / plugin design |
+| `codex/04-current-implementation.md` | What the Codex harness actually does today |
+| `gemini/01..03-*.md` | Gemini settings / extensions / hooks / skills / subagents / MCP / policy design |
+| `gemini/04-current-implementation.md` | What the Gemini harness actually does today |
 
-## Last verification window
+## Verification notes
 
-The harness-specific assumptions in this suite were prepared against upstream documentation current on **2026-04-18**. Because all three harnesses evolve quickly, implementation should keep a small compatibility layer around command flags, structured output parsing, and discovery paths.
+The harness-specific upstream assumptions in the design docs were
+prepared against documentation current on **2026-04-18**. The status
+documents were reconciled with the repository implementation and tests
+for this branch on **2026-05-02**. Because all three harnesses evolve
+quickly, implementation should keep a compatibility layer around command
+flags, structured output parsing, and discovery paths.
