@@ -11,15 +11,20 @@ use katachi_core::config;
 use katachi_core::diagnostic::{any_error, Diagnostic, Severity};
 use katachi_core::error::ResolveError;
 use katachi_core::harness::RosterCatalog;
-use katachi_core::katachi::{KatachiDefinition, KatachiStore, KatachiStoreError};
+use katachi_core::katachi::{KatachiDefinition, KatachiStore, KatachiStoreError, KatachiTarget};
 use katachi_core::model::{BackendKind, HarnessKind, ItemRef, MaterializationMode};
-use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides};
+use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides, StoragePaths};
 use katachi_core::plan::{
     ActionRequest, InvocationRequest, ResolvedItemRef, ResolvedKatachi, SelectionReason,
 };
 use katachi_core::resolve::{resolve, ResolveInputs, ResolveOutput};
 use katachi_core::roster::EdgeKind;
 use katachi_core::validate::{default_validators, run_validators, ValidateContext};
+
+use katachi_harness_claude::config::ClaudeConfig;
+use katachi_harness_claude::roster::ClaudeRosterStore;
+use katachi_harness_codex::roster_file::load_rosters_dir as load_codex_rosters;
+use katachi_harness_gemini::roster::GeminiRosterStore;
 
 use crate::cli::{GlobalArgs, GraphFormat, HaveCmd, MaterializationArg};
 use crate::exit::ExitCode;
@@ -145,7 +150,7 @@ fn prepare(global: &GlobalArgs, have: &HaveCmd) -> Result<Prepared> {
         }
     };
 
-    let definition = match store.find(&have.id) {
+    let definition_raw = match store.find(&have.id) {
         Some(d) => d.clone(),
         None => {
             emit_resolve_error(
@@ -154,6 +159,14 @@ fn prepare(global: &GlobalArgs, have: &HaveCmd) -> Result<Prepared> {
                     id: have.id.clone(),
                 },
             )?;
+            return Ok(Prepared::Failed(ExitCode::Resolve));
+        }
+    };
+
+    let definition = match expand_roster_targets(&definition_raw, &load.config, &storage) {
+        Ok(d) => d,
+        Err(msg) => {
+            emit_resolve_error_message(global, &msg)?;
             return Ok(Prepared::Failed(ExitCode::Resolve));
         }
     };
@@ -198,6 +211,152 @@ fn prepare(global: &GlobalArgs, have: &HaveCmd) -> Result<Prepared> {
         has_resolver_errors,
         has_validation_errors,
     }))
+}
+
+/// Expand any target with a `roster_id` into projected selectors and a
+/// run-profile overlay. Per docs/remediation/policy-decisions.md §6,
+/// mixing `roster_id` with explicit selectors is an error.
+fn expand_roster_targets(
+    raw: &KatachiDefinition,
+    config: &katachi_core::config::KatachiConfig,
+    storage: &StoragePaths,
+) -> std::result::Result<KatachiDefinition, String> {
+    let mut targets: Vec<KatachiTarget> = Vec::with_capacity(raw.targets.len());
+    for target in &raw.targets {
+        let Some(roster_id) = target.roster_id.as_ref() else {
+            targets.push(target.clone());
+            continue;
+        };
+        if roster_id.trim().is_empty() {
+            return Err(format!(
+                "katachi `{}` target {} has empty `roster_id`",
+                raw.id, target.harness
+            ));
+        }
+        if !target.selectors.selectors.is_empty() {
+            return Err(format!(
+                "katachi `{}` target {} mixes `roster_id` with explicit selectors; \
+                 this combination is not yet supported (Plan 4 §5)",
+                raw.id, target.harness
+            ));
+        }
+        let projected = match target.harness {
+            HarnessKind::Claude => project_claude_target(target, roster_id, config, storage)?,
+            HarnessKind::Codex => project_codex_target(target, roster_id, storage)?,
+            HarnessKind::Gemini => project_gemini_target(target, roster_id, storage)?,
+        };
+        targets.push(projected);
+    }
+    Ok(KatachiDefinition {
+        schema_version: raw.schema_version,
+        id: raw.id.clone(),
+        description: raw.description.clone(),
+        targets,
+    })
+}
+
+fn project_claude_target(
+    base: &KatachiTarget,
+    roster_id: &str,
+    config: &katachi_core::config::KatachiConfig,
+    storage: &StoragePaths,
+) -> std::result::Result<KatachiTarget, String> {
+    let claude_config = ClaudeConfig::from_shared(config);
+    let store = ClaudeRosterStore::load_default(storage, &claude_config)
+        .map_err(|err| format!("loading claude rosters: {err}"))?;
+    let roster = store
+        .find(roster_id)
+        .ok_or_else(|| format!("claude roster `{roster_id}` not found"))?;
+    let backend = base
+        .backend
+        .or_else(|| roster.backend());
+    Ok(KatachiTarget {
+        harness: HarnessKind::Claude,
+        roster_id: Some(roster_id.to_string()),
+        backend,
+        preference: base.preference,
+        selectors: roster.to_selector_set(roster.resolution.include_transitive),
+        run_profile_overlay: merge_overlay(&base.run_profile_overlay, roster.run_profile_overlay()),
+    })
+}
+
+fn project_codex_target(
+    base: &KatachiTarget,
+    roster_id: &str,
+    storage: &StoragePaths,
+) -> std::result::Result<KatachiTarget, String> {
+    let dir = storage.rosters_dir().join("codex");
+    let rosters = load_codex_rosters(&dir).map_err(|err| format!("loading codex rosters: {err}"))?;
+    let roster = rosters
+        .into_iter()
+        .find(|r| r.id == roster_id)
+        .ok_or_else(|| format!("codex roster `{roster_id}` not found"))?;
+    let backend = base.backend.or_else(|| {
+        roster
+            .run_profile
+            .backend
+            .as_deref()
+            .and_then(|s| s.parse().ok())
+    });
+    let include_closure = roster.resolution.include_transitive;
+    let overlay = roster.run_profile_overlay();
+    let selectors = roster.to_selector_set(include_closure);
+    Ok(KatachiTarget {
+        harness: HarnessKind::Codex,
+        roster_id: Some(roster_id.to_string()),
+        backend,
+        preference: base.preference,
+        selectors,
+        run_profile_overlay: merge_overlay(&base.run_profile_overlay, overlay),
+    })
+}
+
+fn project_gemini_target(
+    base: &KatachiTarget,
+    roster_id: &str,
+    storage: &StoragePaths,
+) -> std::result::Result<KatachiTarget, String> {
+    let dir = storage.rosters_dir().join("gemini");
+    let store = GeminiRosterStore::load_dir(&dir)
+        .map_err(|err| format!("loading gemini rosters: {err}"))?;
+    let roster = store
+        .find(roster_id)
+        .ok_or_else(|| format!("gemini roster `{roster_id}` not found"))?
+        .clone();
+    let projected = roster.to_katachi_definition();
+    let projected_target = projected
+        .targets
+        .into_iter()
+        .next()
+        .ok_or_else(|| "gemini roster projection missing target".to_string())?;
+    Ok(KatachiTarget {
+        harness: HarnessKind::Gemini,
+        roster_id: Some(roster_id.to_string()),
+        backend: base.backend.or(projected_target.backend),
+        preference: base.preference,
+        selectors: projected_target.selectors,
+        run_profile_overlay: merge_overlay(
+            &base.run_profile_overlay,
+            projected_target.run_profile_overlay,
+        ),
+    })
+}
+
+/// Merge a target-level overlay on top of the roster overlay. Target
+/// fields win field-by-field per policy §6.
+fn merge_overlay(target: &serde_json::Value, mut roster: serde_json::Value) -> serde_json::Value {
+    if target.is_null() {
+        return roster;
+    }
+    if let (Some(target_obj), Some(roster_obj)) =
+        (target.as_object(), roster.as_object_mut())
+    {
+        for (k, v) in target_obj {
+            roster_obj.insert(k.clone(), v.clone());
+        }
+        return roster;
+    }
+    target.clone()
 }
 
 fn emit_config_error_message(global: &GlobalArgs, msg: &str) -> Result<()> {

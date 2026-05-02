@@ -157,6 +157,68 @@ impl CodexRosterFile {
         Self::from_toml_str(&raw)
     }
 
+    /// Project the selection into a [`katachi_core::selector::SelectorSet`]
+    /// scoped to the Codex harness.
+    pub fn to_selector_set(
+        &self,
+        include_closure: bool,
+    ) -> katachi_core::selector::SelectorSet {
+        use katachi_core::selector::{Selector, SelectorSet};
+        let mut selectors: Vec<Selector> = Vec::new();
+        for (kind, ids) in self.selection.by_kind() {
+            if ids.is_empty() {
+                continue;
+            }
+            selectors.push(Selector::ExplicitIds {
+                kind: kind.as_str().to_owned(),
+                ids,
+            });
+        }
+        SelectorSet {
+            selectors,
+            include_packaging_closure: include_closure,
+            include_semantic_closure: include_closure,
+        }
+    }
+
+    /// Convert the run profile into a JSON overlay suitable for
+    /// `KatachiTarget::run_profile_overlay`.
+    pub fn run_profile_overlay(&self) -> serde_json::Value {
+        let mut obj = serde_json::Map::new();
+        if let Some(v) = &self.run_profile.approval_policy {
+            obj.insert(
+                "approval_policy".into(),
+                serde_json::Value::String(v.clone()),
+            );
+        }
+        if let Some(v) = &self.run_profile.sandbox_mode {
+            obj.insert(
+                "sandbox_mode".into(),
+                serde_json::Value::String(v.clone()),
+            );
+        }
+        if let Some(v) = &self.run_profile.model {
+            obj.insert("model".into(), serde_json::Value::String(v.clone()));
+        }
+        if let Some(v) = &self.run_profile.profile {
+            obj.insert("profile".into(), serde_json::Value::String(v.clone()));
+        }
+        if let Some(v) = &self.run_profile.output_mode {
+            obj.insert("output_mode".into(), serde_json::Value::String(v.clone()));
+        }
+        if let Some(v) = self.run_profile.timeout_secs {
+            obj.insert(
+                "timeout_secs".into(),
+                serde_json::Value::Number(v.into()),
+            );
+        }
+        if obj.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::Object(obj)
+        }
+    }
+
     fn validate(&self) -> Result<(), RosterFileError> {
         if self.version != ROSTER_SCHEMA_VERSION {
             return Err(RosterFileError::UnsupportedSchema {
