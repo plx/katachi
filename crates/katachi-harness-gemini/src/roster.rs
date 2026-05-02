@@ -288,6 +288,8 @@ impl GeminiRosterStore {
             return Ok(Self::default());
         }
         let mut out = Self::default();
+        let mut seen: std::collections::BTreeMap<String, Utf8PathBuf> =
+            std::collections::BTreeMap::new();
         let iter = fs::read_dir(dir.as_std_path()).map_err(|source| RosterError::Io {
             path: dir.to_owned(),
             source,
@@ -304,6 +306,14 @@ impl GeminiRosterStore {
                 continue;
             }
             let roster = GeminiRoster::from_toml_file(&utf8)?;
+            if let Some(prev) = seen.get(&roster.id) {
+                return Err(RosterError::DuplicateId {
+                    id: roster.id.clone(),
+                    first: prev.clone(),
+                    second: utf8,
+                });
+            }
+            seen.insert(roster.id.clone(), utf8.clone());
             out.rosters.push(roster);
         }
         out.rosters.sort_by(|a, b| a.id.cmp(&b.id));
@@ -333,6 +343,12 @@ pub enum RosterError {
     },
     #[error("failed to parse Gemini roster TOML: {0}")]
     Parse(#[source] toml::de::Error),
+    #[error("duplicate gemini roster id `{id}` in `{first}` and `{second}`")]
+    DuplicateId {
+        id: String,
+        first: Utf8PathBuf,
+        second: Utf8PathBuf,
+    },
 }
 
 #[cfg(test)]

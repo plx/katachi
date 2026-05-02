@@ -221,6 +221,8 @@ impl ClaudeRosterStore {
         if !dir.exists() {
             return Ok(store);
         }
+        let mut seen: std::collections::BTreeMap<String, Utf8PathBuf> =
+            std::collections::BTreeMap::new();
         let read = std::fs::read_dir(dir.as_std_path()).map_err(|source| {
             ClaudeRosterError::ReadDir {
                 path: dir.to_owned(),
@@ -243,6 +245,14 @@ impl ClaudeRosterStore {
                 continue;
             }
             let r = ClaudeRoster::from_file(&utf8)?;
+            if let Some(prev) = seen.get(&r.id) {
+                return Err(ClaudeRosterError::DuplicateId {
+                    id: r.id.clone(),
+                    first: prev.clone(),
+                    second: utf8,
+                });
+            }
+            seen.insert(r.id.clone(), utf8.clone());
             store.rosters.push(r);
         }
         store.rosters.sort_by(|a, b| a.id.cmp(&b.id));

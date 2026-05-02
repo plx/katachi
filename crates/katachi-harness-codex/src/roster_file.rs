@@ -185,6 +185,12 @@ pub enum RosterFileError {
     UnsupportedSchema { found: u32, expected: u32 },
     #[error("roster id must not be empty")]
     EmptyId,
+    #[error("duplicate codex roster id `{id}` in `{first}` and `{second}`")]
+    DuplicateId {
+        id: String,
+        first: Utf8PathBuf,
+        second: Utf8PathBuf,
+    },
 }
 
 /// Load every `*.toml` under `dir` as a [`CodexRosterFile`].
@@ -197,6 +203,8 @@ pub fn load_rosters_dir(dir: &Utf8Path) -> Result<Vec<CodexRosterFile>, RosterFi
         source,
     })?;
     let mut out: Vec<CodexRosterFile> = Vec::new();
+    let mut seen: std::collections::BTreeMap<String, Utf8PathBuf> =
+        std::collections::BTreeMap::new();
     for entry in read.flatten() {
         let path = entry.path();
         if !path.is_file() {
@@ -208,7 +216,16 @@ pub fn load_rosters_dir(dir: &Utf8Path) -> Result<Vec<CodexRosterFile>, RosterFi
         if utf8.extension() != Some("toml") {
             continue;
         }
-        out.push(CodexRosterFile::from_toml_file(&utf8)?);
+        let parsed = CodexRosterFile::from_toml_file(&utf8)?;
+        if let Some(prev) = seen.get(&parsed.id) {
+            return Err(RosterFileError::DuplicateId {
+                id: parsed.id.clone(),
+                first: prev.clone(),
+                second: utf8,
+            });
+        }
+        seen.insert(parsed.id.clone(), utf8.clone());
+        out.push(parsed);
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)

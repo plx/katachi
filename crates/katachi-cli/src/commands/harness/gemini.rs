@@ -536,6 +536,37 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
         return Ok(ExitCode::Validate);
     }
 
+    if global.dry_run {
+        // Honor the dry-run contract: no overlay materialization, no run
+        // directory, no spawned binary. Render a plan that describes
+        // what would have happened.
+        let plan_ctx = PlanContext {
+            request: &req,
+            resolved: &out.resolved,
+            run_id: RunId::new(),
+        };
+        let plan = match harness.plan(&plan_ctx) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("katachi harness gemini: {e}");
+                return Ok(ExitCode::Plan);
+            }
+        };
+        let report = PlanReport {
+            roster: &definition,
+            resolved: &out.resolved,
+            plan: &plan,
+            validator_diagnostics: validator_diags.as_slice(),
+        };
+        if global.json {
+            serde_json::to_writer_pretty(std::io::stdout(), &report)?;
+            println!();
+        } else {
+            render_plan_human(&report);
+        }
+        return Ok(ExitCode::Ok);
+    }
+
     // Materialize before planning so the plan can point at the overlay.
     let (mut overlay_handle, overlay_manifest) = match req.materialization {
         CoreMatMode::TempOverlay => {
@@ -632,21 +663,43 @@ fn run_after_overlay(
         started_at: time::OffsetDateTime::now_utc(),
     };
 
+    let partial_path = run_dir.partial_path().to_owned();
     let record = match harness.execute(&exec_ctx) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("katachi harness gemini: execute failed: {e}");
             let _ = run_dir.write_manifest();
+            eprintln!(
+                "katachi harness gemini: partial preserved at `{}`",
+                partial_path
+            );
             return Ok(ExitCode::Execute);
         }
     };
     let _ = run_dir.write_manifest();
-    let committed = match run_dir.commit() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("katachi harness gemini: failed to commit run: {e}");
-            return Ok(ExitCode::Execute);
+
+    let success = matches!(
+        record.result.outcome,
+        katachi_core::record::Outcome::Success | katachi_core::record::Outcome::Planned
+    );
+    let final_path: Option<Utf8PathBuf> = if success {
+        match run_dir.commit() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("katachi harness gemini: failed to commit run: {e}");
+                eprintln!(
+                    "katachi harness gemini: partial preserved at `{}`",
+                    partial_path
+                );
+                None
+            }
         }
+    } else {
+        eprintln!(
+            "katachi harness gemini: partial preserved at `{}`",
+            partial_path
+        );
+        None
     };
     if global.json {
         serde_json::to_writer_pretty(std::io::stdout(), &record)?;
@@ -654,11 +707,17 @@ fn run_after_overlay(
     } else {
         println!("run complete");
         println!("  run_id : {}", record.run_id);
-        println!("  dir    : {}", committed);
+        match &final_path {
+            Some(p) => println!("  dir    : {}", p),
+            None => println!("  dir    : {} (partial)", partial_path),
+        }
         println!("  outcome: {:?}", record.result.outcome);
         if let Some(code) = record.result.exit_code {
             println!("  exit   : {code}");
         }
+    }
+    if success && final_path.is_none() {
+        return Ok(ExitCode::Execute);
     }
     match record.result.outcome {
         katachi_core::record::Outcome::Success | katachi_core::record::Outcome::Planned => {

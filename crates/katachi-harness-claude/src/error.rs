@@ -60,6 +60,12 @@ pub enum ClaudeRosterError {
         #[source]
         source: std::io::Error,
     },
+    #[error("duplicate claude roster id `{id}` in `{first}` and `{second}`")]
+    DuplicateId {
+        id: String,
+        first: Utf8PathBuf,
+        second: Utf8PathBuf,
+    },
 }
 
 #[derive(Debug, Error)]

@@ -154,7 +154,6 @@ binary = "fake-gemini"
 struct CodexFx {
     _td: TempDir,
     workdir: PathBuf,
-    fake_path: PathBuf,
 }
 
 impl CodexFx {
@@ -201,10 +200,10 @@ sandbox_mode = "read-only"
         )
         .unwrap();
 
+        let _ = fake_path;
         Self {
             _td: td,
             workdir,
-            fake_path,
         }
     }
 

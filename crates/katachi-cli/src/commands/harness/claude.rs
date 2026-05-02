@@ -297,14 +297,15 @@ fn resolve_backend(
     roster: &katachi_harness_claude::roster::ClaudeRoster,
     claude_config: &ClaudeConfig,
 ) -> BackendKind {
-    // CLI `--prefer-backend` wins over roster/config defaults.
+    // Per docs/remediation/policy-decisions.md §3:
+    //   roster pin > --prefer-backend > config default > built-in `cli`.
+    if let Some(b) = roster.backend() {
+        return b;
+    }
     for b in &global.prefer_backend {
         if let Ok(parsed) = b.parse::<BackendKind>() {
             return parsed;
         }
-    }
-    if let Some(b) = roster.backend() {
-        return b;
     }
     if let Ok(parsed) = claude_config.default_backend.parse::<BackendKind>() {
         return parsed;

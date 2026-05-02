@@ -52,9 +52,23 @@ fn dispatch_have(global: &GlobalArgs, have: HaveCmd) -> ExitCode {
     }
 }
 
-fn not_yet_implemented(_global: &GlobalArgs, cmd: &Command) -> ExitCode {
+fn not_yet_implemented(global: &GlobalArgs, cmd: &Command) -> ExitCode {
     let label = describe_command(cmd);
-    eprintln!("katachi: `{label}` is not yet implemented in this phase");
+    let message = format!("`{label}` is not yet implemented in this phase");
+    if global.json {
+        let payload = serde_json::json!({
+            "error": {
+                "kind": "not_implemented",
+                "command": label,
+                "message": message,
+            }
+        });
+        if serde_json::to_writer_pretty(std::io::stdout(), &payload).is_ok() {
+            println!();
+        }
+    } else {
+        eprintln!("katachi: {message}");
+    }
     ExitCode::NotImplemented
 }
 
