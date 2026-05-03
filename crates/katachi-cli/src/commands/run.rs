@@ -15,6 +15,7 @@ use katachi_core::persist::{
     RunFileKind, FILE_MANIFEST, FILE_PLAN, FILE_RECORD, FILE_REQUEST, FILE_STDERR, FILE_STDOUT,
     FILE_TRANSCRIPT, MANIFEST_SCHEMA_VERSION, PARTIAL_SUFFIX,
 };
+use katachi_core::record::RunId;
 use katachi_core::transcript::{EventKind, TranscriptEvent};
 
 use crate::cli::{GlobalArgs, RunAction, RunCmd};
@@ -172,17 +173,17 @@ fn emit_runs_list(global: &GlobalArgs, summaries: &[RunSummary]) {
 }
 
 fn run_show(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
+    let id = match parse_run_id_arg(global, run_id_arg) {
+        Ok(id) => id,
+        Err(code) => return Ok(code),
+    };
     let runs_dir = match runs_dir(global)? {
         Some(p) => p,
         None => {
-            emit_run_not_found(global, run_id_arg);
+            emit_run_not_found(global, &id);
             return Ok(ExitCode::Resolve);
         }
     };
-    let id = run_id_arg
-        .strip_suffix(PARTIAL_SUFFIX)
-        .unwrap_or(run_id_arg)
-        .to_string();
     let committed = runs_dir.join(&id);
     let partial = runs_dir.join(format!("{id}{PARTIAL_SUFFIX}"));
 
@@ -272,17 +273,17 @@ fn run_show(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
 }
 
 fn run_transcript(global: &GlobalArgs, run_id_arg: &str) -> Result<ExitCode> {
+    let id = match parse_run_id_arg(global, run_id_arg) {
+        Ok(id) => id,
+        Err(code) => return Ok(code),
+    };
     let runs_dir = match runs_dir(global)? {
         Some(p) => p,
         None => {
-            emit_run_not_found(global, run_id_arg);
+            emit_run_not_found(global, &id);
             return Ok(ExitCode::Resolve);
         }
     };
-    let id = run_id_arg
-        .strip_suffix(PARTIAL_SUFFIX)
-        .unwrap_or(run_id_arg)
-        .to_string();
     let committed = runs_dir.join(&id);
     let partial = runs_dir.join(format!("{id}{PARTIAL_SUFFIX}"));
     let (state, path) = match (committed.is_dir(), partial.is_dir()) {
@@ -470,6 +471,22 @@ fn clipped(text: &str) -> String {
     }
 }
 
+fn parse_run_id_arg(global: &GlobalArgs, run_id_arg: &str) -> Result<String, ExitCode> {
+    let id_arg = run_id_arg
+        .strip_suffix(PARTIAL_SUFFIX)
+        .unwrap_or(run_id_arg);
+    let Ok(run_id) = id_arg.parse::<RunId>() else {
+        emit_invalid_run_id(global, run_id_arg);
+        return Err(ExitCode::Resolve);
+    };
+    let canonical = run_id.to_string_lossy();
+    if id_arg != canonical {
+        emit_invalid_run_id(global, run_id_arg);
+        return Err(ExitCode::Resolve);
+    }
+    Ok(canonical)
+}
+
 fn read_json_artifact(path: &Path, name: &str, diagnostics: &mut Vec<String>) -> Option<Value> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
@@ -572,6 +589,24 @@ fn emit_run_not_found(global: &GlobalArgs, run_id: &str) {
         println!();
     } else {
         eprintln!("katachi run: no run with id `{run_id}`");
+    }
+}
+
+fn emit_invalid_run_id(global: &GlobalArgs, run_id: &str) {
+    let msg = format!(
+        "invalid run id `{run_id}`; expected lowercase hyphenated UUID, optionally suffixed with `{PARTIAL_SUFFIX}`"
+    );
+    if global.json {
+        let payload = serde_json::json!({
+            "error": {
+                "kind": "resolve",
+                "message": msg,
+            }
+        });
+        let _ = serde_json::to_writer_pretty(std::io::stdout(), &payload);
+        println!();
+    } else {
+        eprintln!("katachi run: {msg}");
     }
 }
 

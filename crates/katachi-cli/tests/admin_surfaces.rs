@@ -236,6 +236,44 @@ fn run_show_unknown_returns_resolve() {
 }
 
 #[test]
+fn run_show_rejects_path_traversal_run_id() {
+    let fx = Fx::new();
+    fs::create_dir_all(fx.data_root.join("runs")).unwrap();
+    let escaped = fx.data_root.join("other-dir");
+    fs::create_dir_all(&escaped).unwrap();
+    write_record(&escaped, "01900000-0000-7000-8000-000000000099", "success");
+
+    let out = fx.run(&["--json", "run", "show", "../other-dir"]);
+    assert_eq!(out.status.code(), Some(4));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(v["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("invalid run id"));
+    assert!(!stdout.contains("success"), "stdout: {stdout}");
+}
+
+#[test]
+fn run_transcript_rejects_absolute_path_run_id() {
+    let fx = Fx::new();
+    fs::create_dir_all(fx.data_root.join("runs")).unwrap();
+    let escaped = fx.data_root.join("absolute-run");
+    fs::create_dir_all(&escaped).unwrap();
+    write_transcript(&escaped);
+
+    let out = fx.run(&["--json", "run", "transcript", escaped.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(4));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(v["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("invalid run id"));
+    assert!(!stdout.contains("events"), "stdout: {stdout}");
+}
+
+#[test]
 fn run_show_inconsistent_committed_and_partial_returns_resolve() {
     let fx = Fx::new();
     let id = "01900000-0000-7000-8000-000000000016";
