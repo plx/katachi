@@ -32,8 +32,10 @@ impl HarnessModule for GeminiHarness {
     }
 
     fn scan(&self, ctx: &ScanContext<'_>) -> Result<RosterCatalog, ResolveError> {
-        let gemini_cfg = GeminiConfig::from_katachi(ctx.config)
-            .map_err(|e| ResolveError::UnknownItem { item: e.to_string() })?;
+        let gemini_cfg =
+            GeminiConfig::from_katachi(ctx.config).map_err(|e| ResolveError::UnknownItem {
+                item: e.to_string(),
+            })?;
         Ok(scan_gemini(&gemini_cfg, ctx.cwd))
     }
 

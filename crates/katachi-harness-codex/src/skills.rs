@@ -50,7 +50,11 @@ impl Skill {
             "mcp_requirements": self.mcp_requirements.clone(),
         });
         let mut capabilities: Vec<String> = Vec::new();
-        if let Some(caps) = self.frontmatter.get("capabilities").and_then(|v| v.as_array()) {
+        if let Some(caps) = self
+            .frontmatter
+            .get("capabilities")
+            .and_then(|v| v.as_array())
+        {
             for c in caps {
                 if let Some(s) = c.as_str() {
                     capabilities.push(s.to_string());
@@ -181,10 +185,7 @@ fn load_skill(dir: &Utf8Path, scope: &str, diagnostics: &mut Vec<Diagnostic>) ->
             return None;
         }
     };
-    let id = dir
-        .file_name()
-        .unwrap_or("unnamed")
-        .to_string();
+    let id = dir.file_name().unwrap_or("unnamed").to_string();
 
     let (frontmatter_value, summary) = parse_frontmatter(&raw, diagnostics, &skill_md);
     let display_name = frontmatter_value
@@ -349,7 +350,7 @@ Summary line.
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let skills = discover_skills(&settings, &[root.clone()], &mut diags);
+        let skills = discover_skills(&settings, std::slice::from_ref(&root), &mut diags);
         assert_eq!(skills.len(), 1);
         let s = &skills[0];
         assert_eq!(s.id, "axe");
@@ -372,7 +373,7 @@ Summary line.
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let skills = discover_skills(&settings, &[root.clone()], &mut diags);
+        let skills = discover_skills(&settings, std::slice::from_ref(&root), &mut diags);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].id, "plain");
     }
@@ -393,7 +394,7 @@ mcp_requirements: [chrome]
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let skills = discover_skills(&settings, &[root.clone()], &mut diags);
+        let skills = discover_skills(&settings, std::slice::from_ref(&root), &mut diags);
         let mcps = vec![McpServer {
             id: "user:chrome".into(),
             name: "chrome".into(),

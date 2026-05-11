@@ -16,10 +16,7 @@ pub enum ClaudeDiscoveryError {
         source: std::io::Error,
     },
     #[error("failed to parse frontmatter in `{path}`: {message}")]
-    Frontmatter {
-        path: Utf8PathBuf,
-        message: String,
-    },
+    Frontmatter { path: Utf8PathBuf, message: String },
     #[error("failed to parse `{path}` as JSON: {source}")]
     Json {
         path: Utf8PathBuf,
@@ -59,6 +56,12 @@ pub enum ClaudeRosterError {
         path: Utf8PathBuf,
         #[source]
         source: std::io::Error,
+    },
+    #[error("duplicate claude roster id `{id}` in `{first}` and `{second}`")]
+    DuplicateId {
+        id: String,
+        first: Utf8PathBuf,
+        second: Utf8PathBuf,
     },
 }
 

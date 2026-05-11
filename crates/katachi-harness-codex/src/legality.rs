@@ -73,7 +73,10 @@ pub fn validate_requirements(effective: &EffectiveCodexConfig) -> Vec<Diagnostic
         .get("requirements")
         .and_then(|v| v.as_object())
     {
-        if let Some(forbidden) = req.get("forbid_approval_policies").and_then(|v| v.as_array()) {
+        if let Some(forbidden) = req
+            .get("forbid_approval_policies")
+            .and_then(|v| v.as_array())
+        {
             if let Some(selected) = &effective.policy.approval_policy {
                 for entry in forbidden {
                     if entry.as_str() == Some(selected.as_str()) {
@@ -181,7 +184,10 @@ pub fn validate_run_profile(effective: &EffectiveCodexConfig) -> Vec<Diagnostic>
             effective.policy.approval_policy.as_deref(),
             effective.policy.sandbox_mode.as_deref(),
         ),
-        (Some("never"), Some("workspace-write" | "danger-full-access"))
+        (
+            Some("never"),
+            Some("workspace-write" | "danger-full-access")
+        )
     ) {
         out.push(Diagnostic::warning(
             "codex.legality.run-profile",

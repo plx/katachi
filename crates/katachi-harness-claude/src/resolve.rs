@@ -52,7 +52,7 @@ pub fn resolve_roster(
     }
 
     // 2. Closure.
-    let trace = expand_closure(&catalog, seeds.iter().cloned().collect(), &roster.resolution);
+    let trace = expand_closure(&catalog, seeds.to_vec(), &roster.resolution);
 
     // 3. Assemble ResolvedItemRef set in deterministic order.
     let mut resolved_items: Vec<ResolvedItemRef> = Vec::with_capacity(trace.len());
@@ -609,4 +609,3 @@ plugins = ["web-a11y"]
         assert!(ids.contains("reviewer"));
     }
 }
-

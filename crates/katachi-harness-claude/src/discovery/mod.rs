@@ -21,11 +21,14 @@ pub mod agent;
 pub mod hooks;
 pub mod instruction;
 pub mod mcp;
+pub mod output_style;
 pub mod plugin;
 pub mod skill;
 
 /// Run the full Claude scan against the given scan context.
-pub fn scan(ctx: &katachi_core::harness::ScanContext<'_>) -> Result<RosterCatalog, ClaudeDiscoveryError> {
+pub fn scan(
+    ctx: &katachi_core::harness::ScanContext<'_>,
+) -> Result<RosterCatalog, ClaudeDiscoveryError> {
     let config = ClaudeConfig::from_shared(ctx.config);
     let roots = discover_roots(ctx.cwd, &config);
     scan_from_roots(&roots, &config)
@@ -45,6 +48,7 @@ pub fn scan_from_roots(
     instruction::scan_instructions(&mut state, roots)?;
     hooks::scan_hooks(&mut state, roots)?;
     mcp::scan_mcp(&mut state, roots)?;
+    output_style::scan_loose_output_styles(&mut state, roots)?;
 
     Ok(state.finalize())
 }
@@ -135,21 +139,13 @@ pub struct PendingEdge {
 }
 
 /// Helper used by sub-scanners: push a warning diagnostic into the catalog.
-pub(crate) fn push_warning(
-    catalog: &mut RosterCatalog,
-    code: &str,
-    message: impl Into<String>,
-) {
+pub(crate) fn push_warning(catalog: &mut RosterCatalog, code: &str, message: impl Into<String>) {
     catalog.diagnostics.push(Diagnostic::warning(code, message));
 }
 
 /// Helper used by sub-scanners: push an info diagnostic into the catalog.
 #[allow(dead_code)]
-pub(crate) fn push_info(
-    catalog: &mut RosterCatalog,
-    code: &str,
-    message: impl Into<String>,
-) {
+pub(crate) fn push_info(catalog: &mut RosterCatalog, code: &str, message: impl Into<String>) {
     catalog.diagnostics.push(Diagnostic::info(code, message));
 }
 

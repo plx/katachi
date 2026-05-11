@@ -24,6 +24,15 @@ pub fn analyze(
     settings: &CodexSettings,
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    if !effective.policy.writable_dirs.is_empty() {
+        out.push(Diagnostic::warning(
+            "codex.projection.writable-dirs-advisory",
+            format!(
+                "writable_dirs is recorded as advisory materialization metadata; no stable Codex CLI flag is emitted for {} path(s)",
+                effective.policy.writable_dirs.len()
+            ),
+        ));
+    }
 
     match backend {
         BackendKind::Cli => analyze_cli(&mut out, roster, effective),
@@ -191,7 +200,9 @@ mod tests {
             },
         );
         assert!(has_blocking(&diags));
-        assert!(diags.iter().any(|d| d.code == "codex.projection.sdk-py.disabled"));
+        assert!(diags
+            .iter()
+            .any(|d| d.code == "codex.projection.sdk-py.disabled"));
     }
 
     #[test]
@@ -210,7 +221,9 @@ mod tests {
             &CodexSettings::default(),
         );
         assert!(!has_blocking(&diags));
-        assert!(diags.iter().any(|d| d.code == "codex.projection.sdk-ts.hooks"));
+        assert!(diags
+            .iter()
+            .any(|d| d.code == "codex.projection.sdk-ts.hooks"));
     }
 
     #[test]
@@ -232,5 +245,22 @@ mod tests {
         assert!(diags
             .iter()
             .any(|d| d.code == "codex.projection.sdk-py.stdio-mcp"));
+    }
+
+    #[test]
+    fn writable_dirs_warn_as_advisory() {
+        let mut eff = empty_effective();
+        eff.policy
+            .writable_dirs
+            .push(Utf8PathBuf::from("/tmp/work"));
+        let diags = analyze(
+            BackendKind::Cli,
+            &empty_roster(),
+            &eff,
+            &CodexSettings::default(),
+        );
+        assert!(diags
+            .iter()
+            .any(|d| d.code == "codex.projection.writable-dirs-advisory"));
     }
 }

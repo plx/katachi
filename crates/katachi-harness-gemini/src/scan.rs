@@ -21,7 +21,9 @@ use crate::subagent;
 
 /// Complete scan entrypoint.
 pub fn scan_gemini(config: &GeminiConfig, cwd: &Utf8Path) -> RosterCatalog {
-    let home = config.resolved_home().unwrap_or_else(|_| Utf8PathBuf::from("/"));
+    let home = config
+        .resolved_home()
+        .unwrap_or_else(|_| Utf8PathBuf::from("/"));
     let user_roots = config.resolved_user_roots(&home);
     let project_roots = config.resolved_project_roots(cwd);
     let ext_roots = config.resolved_extension_roots(&home);
@@ -49,20 +51,14 @@ fn discover_loose_skills(
 ) -> Vec<crate::skill::Skill> {
     let mut out: Vec<crate::skill::Skill> = Vec::new();
     for root in user_roots {
-        for candidate in &[
-            root.join("skills"),
-            root.join(".gemini").join("skills"),
-        ] {
+        for candidate in &[root.join("skills"), root.join(".gemini").join("skills")] {
             if let Some(skills) = skill::scan_user_dir(candidate) {
                 out.extend(skills);
             }
         }
     }
     for root in project_roots {
-        for candidate in &[
-            root.join("skills"),
-            root.join(".gemini").join("skills"),
-        ] {
+        for candidate in &[root.join("skills"), root.join(".gemini").join("skills")] {
             if let Some(skills) = skill::scan_project_dir(candidate) {
                 out.extend(skills);
             }
@@ -77,20 +73,14 @@ fn discover_loose_subagents(
 ) -> Vec<crate::subagent::Subagent> {
     let mut out: Vec<crate::subagent::Subagent> = Vec::new();
     for root in user_roots {
-        for candidate in &[
-            root.join("agents"),
-            root.join(".gemini").join("agents"),
-        ] {
+        for candidate in &[root.join("agents"), root.join(".gemini").join("agents")] {
             if let Some(ags) = subagent::scan_user_dir(candidate) {
                 out.extend(ags);
             }
         }
     }
     for root in project_roots {
-        for candidate in &[
-            root.join("agents"),
-            root.join(".gemini").join("agents"),
-        ] {
+        for candidate in &[root.join("agents"), root.join(".gemini").join("agents")] {
             if let Some(ags) = subagent::scan_project_dir(candidate) {
                 out.extend(ags);
             }
@@ -171,11 +161,8 @@ pub fn build_catalog(
             let item = skill::to_discovered_item(s);
             let to = item.item_ref.clone();
             if catalog.insert_item(item).is_ok() {
-                let _ = catalog.insert_edge(containment_edge(
-                    &ext_ref,
-                    &to,
-                    GeminiEdgeKind::Contains,
-                ));
+                let _ =
+                    catalog.insert_edge(containment_edge(&ext_ref, &to, GeminiEdgeKind::Contains));
             }
         }
 
@@ -184,11 +171,8 @@ pub fn build_catalog(
             let item = subagent::to_discovered_item(a);
             let to = item.item_ref.clone();
             if catalog.insert_item(item).is_ok() {
-                let _ = catalog.insert_edge(containment_edge(
-                    &ext_ref,
-                    &to,
-                    GeminiEdgeKind::Contains,
-                ));
+                let _ =
+                    catalog.insert_edge(containment_edge(&ext_ref, &to, GeminiEdgeKind::Contains));
             }
         }
 
@@ -223,11 +207,8 @@ pub fn build_catalog(
             let item = mcp::to_discovered_item(m);
             let to = item.item_ref.clone();
             if catalog.insert_item(item).is_ok() {
-                let _ = catalog.insert_edge(containment_edge(
-                    &ext_ref,
-                    &to,
-                    GeminiEdgeKind::Contains,
-                ));
+                let _ =
+                    catalog.insert_edge(containment_edge(&ext_ref, &to, GeminiEdgeKind::Contains));
             }
         }
     }
@@ -284,7 +265,9 @@ pub fn build_catalog(
             let item = hook::to_discovered_item(&hook_set);
             let _ = catalog.insert_item(item);
         }
-        if let Some(policy_set) = policy::scan_settings(&layer.body, layer.scope.as_str(), &layer.path) {
+        if let Some(policy_set) =
+            policy::scan_settings(&layer.body, layer.scope.as_str(), &layer.path)
+        {
             let item = policy::to_discovered_item(&policy_set);
             let _ = catalog.insert_item(item);
         }
@@ -292,9 +275,9 @@ pub fn build_catalog(
 
     // --- Diagnostics for errors raised during discovery ---
     for e in &settings.errors {
-        catalog.diagnostics.push(
-            Diagnostic::warning("gemini.settings", e.to_string()).with_pointer("/settings"),
-        );
+        catalog
+            .diagnostics
+            .push(Diagnostic::warning("gemini.settings", e.to_string()).with_pointer("/settings"));
     }
     for e in &extensions.errors {
         catalog.diagnostics.push(
@@ -327,7 +310,7 @@ fn containment_edge(from: &ItemRef, to: &ItemRef, kind: GeminiEdgeKind) -> Depen
 /// item's kind.
 pub fn explain_sections_for(item: &DiscoveredItem, catalog: &RosterCatalog) -> Vec<ExplainSection> {
     let mut sections = Vec::new();
-    if !item.source.path.is_none() {
+    if item.source.path.is_some() {
         sections.push(ExplainSection {
             title: "Source".into(),
             body: format!(
@@ -350,10 +333,7 @@ pub fn explain_sections_for(item: &DiscoveredItem, catalog: &RosterCatalog) -> V
     if let Some(pkg) = &item.packaging {
         sections.push(ExplainSection {
             title: "Packaging".into(),
-            body: format!(
-                "ships in {} (required: {})",
-                pkg.item_ref, pkg.required
-            ),
+            body: format!("ships in {} (required: {})", pkg.item_ref, pkg.required),
         });
     }
     // Neighbors: outgoing edges.
@@ -450,10 +430,7 @@ mod tests {
             &ext_dir.join("hooks/hooks.json"),
             r#"{"PreToolUse": [{"command": "echo"}]}"#,
         );
-        write(
-            &ext_dir.join("policies/readonly.json"),
-            r#"{"allow": []}"#,
-        );
+        write(&ext_dir.join("policies/readonly.json"), r#"{"allow": []}"#);
         write(
             &ext_dir.join("agents/explorer.md"),
             "---\ndescription: explore\nexperimental: true\n---\n",
@@ -472,11 +449,13 @@ mod tests {
             "---\ndescription: loose skill\n---\n",
         );
 
-        let mut cfg = GeminiConfig::default();
-        cfg.home = Some(home.clone());
-        cfg.user_roots = vec![home];
-        cfg.project_roots = vec![project.clone()];
-        cfg.extension_roots = vec![ext_root];
+        let cfg = GeminiConfig {
+            home: Some(home.clone()),
+            user_roots: vec![home],
+            project_roots: vec![project.clone()],
+            extension_roots: vec![ext_root],
+            ..GeminiConfig::default()
+        };
         (tmp, cfg, project)
     }
 

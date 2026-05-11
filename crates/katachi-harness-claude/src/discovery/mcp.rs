@@ -43,12 +43,11 @@ fn scan_settings_for_mcp(
     if !path.exists() {
         return Ok(());
     }
-    let raw = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let raw =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
+        })?;
     let value: Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
         Err(_source) => return Ok(()), // hooks scanner already warned
@@ -74,12 +73,11 @@ fn scan_mcp_json_file(
     if !path.exists() {
         return Ok(());
     }
-    let raw = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let raw =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
+        })?;
     let value: Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
         Err(source) => {

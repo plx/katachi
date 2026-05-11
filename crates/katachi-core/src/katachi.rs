@@ -119,7 +119,8 @@ impl KatachiStore {
     /// Load every `*.toml` under `dir`, ignoring non-TOML files.
     ///
     /// Missing directories yield an empty store plus a diagnostic-style
-    /// error the caller can downgrade to a warning.
+    /// error the caller can downgrade to a warning. Duplicate ids across
+    /// files are an error per the locked policy.
     pub fn load_from_dir(dir: &Utf8Path) -> Result<Self, KatachiStoreError> {
         if !dir.exists() {
             return Err(KatachiStoreError::Missing {
@@ -127,6 +128,8 @@ impl KatachiStore {
             });
         }
         let mut store = Self::new();
+        let mut seen: std::collections::BTreeMap<String, Utf8PathBuf> =
+            std::collections::BTreeMap::new();
         let read_dir =
             std::fs::read_dir(dir.as_std_path()).map_err(|source| KatachiStoreError::Io {
                 path: dir.to_owned(),
@@ -153,6 +156,14 @@ impl KatachiStore {
                     source,
                 }
             })?;
+            if let Some(prev) = seen.get(&def.id) {
+                return Err(KatachiStoreError::DuplicateId {
+                    id: def.id.clone(),
+                    first: prev.clone(),
+                    second: utf8,
+                });
+            }
+            seen.insert(def.id.clone(), utf8.clone());
             store.katachis.push(def);
         }
         store.katachis.sort_by(|a, b| a.id.cmp(&b.id));
@@ -211,6 +222,12 @@ pub enum KatachiStoreError {
         path: Utf8PathBuf,
         #[source]
         source: KatachiDefinitionError,
+    },
+    #[error("duplicate katachi id `{id}` in {first} and {second}")]
+    DuplicateId {
+        id: String,
+        first: Utf8PathBuf,
+        second: Utf8PathBuf,
     },
 }
 
@@ -351,5 +368,23 @@ harness = "codex"
     fn store_missing_dir_returns_typed_error() {
         let err = KatachiStore::load_from_dir(Utf8Path::new("/no/such/dir/exists")).unwrap_err();
         assert!(matches!(err, KatachiStoreError::Missing { .. }));
+    }
+
+    #[test]
+    fn store_rejects_duplicate_ids_across_files() {
+        let td = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(td.path().to_path_buf()).unwrap();
+        let body = r#"
+id = "dup"
+[[targets]]
+harness = "claude"
+"#;
+        std::fs::write(root.join("a.toml"), body).unwrap();
+        std::fs::write(root.join("b.toml"), body).unwrap();
+        let err = KatachiStore::load_from_dir(&root).unwrap_err();
+        match err {
+            KatachiStoreError::DuplicateId { id, .. } => assert_eq!(id, "dup"),
+            other => panic!("expected DuplicateId error, got {other:?}"),
+        }
     }
 }

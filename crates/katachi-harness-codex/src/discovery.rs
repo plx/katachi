@@ -68,21 +68,13 @@ pub fn discover(inputs: &DiscoveryInputs) -> Result<RosterCatalog, ResolveError>
     crate::roster::insert_instruction_edges(&instructions, &mut catalog, &mut diagnostics);
 
     // 3. Skills.
-    let skills = discover_skills(
-        &inputs.settings,
-        &project_roots,
-        &mut diagnostics,
-    );
+    let skills = discover_skills(&inputs.settings, &project_roots, &mut diagnostics);
     for skill in &skills {
         insert_item(&mut catalog, skill.to_item(), &mut diagnostics);
     }
 
     // 4. Custom agents.
-    let agents = discover_agents(
-        &inputs.settings,
-        &project_roots,
-        &mut diagnostics,
-    );
+    let agents = discover_agents(&inputs.settings, &project_roots, &mut diagnostics);
     for agent in &agents {
         insert_item(&mut catalog, agent.to_item(), &mut diagnostics);
     }
@@ -177,7 +169,10 @@ pub fn resolve_project_roots(roots: &[Utf8PathBuf], cwd: &Utf8Path) -> Vec<Utf8P
             cwd.join(root)
         };
         // Deduplicate.
-        if !out.iter().any(|existing: &Utf8PathBuf| existing == &absolute) {
+        if !out
+            .iter()
+            .any(|existing: &Utf8PathBuf| existing == &absolute)
+        {
             out.push(absolute);
         }
     }

@@ -100,10 +100,11 @@ pub enum MaterializationMode {
 impl ClaudeRoster {
     /// Parse a Claude roster from a TOML string.
     pub fn from_toml_str(path: &Utf8Path, s: &str) -> Result<Self, ClaudeRosterError> {
-        let parsed: ClaudeRoster = toml::from_str(s).map_err(|source| ClaudeRosterError::Parse {
-            path: path.to_owned(),
-            source,
-        })?;
+        let parsed: ClaudeRoster =
+            toml::from_str(s).map_err(|source| ClaudeRosterError::Parse {
+                path: path.to_owned(),
+                source,
+            })?;
         parsed.validate(path)?;
         Ok(parsed)
     }
@@ -180,6 +181,108 @@ impl ClaudeRoster {
             .as_deref()
             .and_then(|b| b.parse().ok())
     }
+
+    /// Project the roster's selection into a [`katachi_core::selector::SelectorSet`]
+    /// scoped to the Claude harness. `include_closure` mirrors
+    /// [`RosterResolution::include_transitive`].
+    pub fn to_selector_set(&self, include_closure: bool) -> katachi_core::selector::SelectorSet {
+        use katachi_core::selector::{Selector, SelectorSet};
+        let mut selectors: Vec<Selector> = Vec::new();
+        let push = |out: &mut Vec<Selector>, kind: &str, ids: &[String]| {
+            if ids.is_empty() {
+                return;
+            }
+            out.push(Selector::ExplicitIds {
+                kind: kind.to_owned(),
+                ids: ids.to_vec(),
+            });
+        };
+        push(&mut selectors, "plugin", &self.selection.plugins);
+        push(&mut selectors, "skill", &self.selection.skills);
+        push(&mut selectors, "agent", &self.selection.agents);
+        push(&mut selectors, "hook_set", &self.selection.hooks);
+        push(&mut selectors, "mcp_server", &self.selection.mcp_servers);
+        push(
+            &mut selectors,
+            "instruction_source",
+            &self.selection.instructions,
+        );
+        push(
+            &mut selectors,
+            "output_style",
+            &self.selection.output_styles,
+        );
+        SelectorSet {
+            selectors,
+            include_packaging_closure: include_closure,
+            include_semantic_closure: include_closure,
+        }
+    }
+
+    /// Convert the run profile into a JSON overlay suitable for
+    /// `KatachiTarget::run_profile_overlay`.
+    pub fn run_profile_overlay(&self) -> serde_json::Value {
+        let mut obj = serde_json::Map::new();
+        if let Some(v) = &self.run_profile.model {
+            obj.insert("model".into(), serde_json::Value::String(v.clone()));
+        }
+        if let Some(v) = &self.run_profile.permission_mode {
+            obj.insert(
+                "permission_mode".into(),
+                serde_json::Value::String(v.clone()),
+            );
+        }
+        if let Some(v) = &self.run_profile.output_format {
+            obj.insert("output_format".into(), serde_json::Value::String(v.clone()));
+        }
+        if !self.run_profile.allowed_tools.is_empty() {
+            obj.insert(
+                "allowed_tools".into(),
+                serde_json::Value::Array(
+                    self.run_profile
+                        .allowed_tools
+                        .iter()
+                        .cloned()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            );
+        }
+        if !self.run_profile.disallowed_tools.is_empty() {
+            obj.insert(
+                "disallowed_tools".into(),
+                serde_json::Value::Array(
+                    self.run_profile
+                        .disallowed_tools
+                        .iter()
+                        .cloned()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            );
+        }
+        if !self.run_profile.setting_sources.is_empty() {
+            obj.insert(
+                "setting_sources".into(),
+                serde_json::Value::Array(
+                    self.run_profile
+                        .setting_sources
+                        .iter()
+                        .cloned()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            );
+        }
+        if let Some(v) = self.run_profile.timeout_secs {
+            obj.insert("timeout_secs".into(), serde_json::Value::Number(v.into()));
+        }
+        if obj.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::Object(obj)
+        }
+    }
 }
 
 /// Conventional roster directory: `<data_root>/rosters/claude/` unless
@@ -221,12 +324,13 @@ impl ClaudeRosterStore {
         if !dir.exists() {
             return Ok(store);
         }
-        let read = std::fs::read_dir(dir.as_std_path()).map_err(|source| {
-            ClaudeRosterError::ReadDir {
+        let mut seen: std::collections::BTreeMap<String, Utf8PathBuf> =
+            std::collections::BTreeMap::new();
+        let read =
+            std::fs::read_dir(dir.as_std_path()).map_err(|source| ClaudeRosterError::ReadDir {
                 path: dir.to_owned(),
                 source,
-            }
-        })?;
+            })?;
         for entry in read {
             let entry = entry.map_err(|source| ClaudeRosterError::ReadDir {
                 path: dir.to_owned(),
@@ -243,6 +347,14 @@ impl ClaudeRosterStore {
                 continue;
             }
             let r = ClaudeRoster::from_file(&utf8)?;
+            if let Some(prev) = seen.get(&r.id) {
+                return Err(ClaudeRosterError::DuplicateId {
+                    id: r.id.clone(),
+                    first: prev.clone(),
+                    second: utf8,
+                });
+            }
+            seen.insert(r.id.clone(), utf8.clone());
             store.rosters.push(r);
         }
         store.rosters.sort_by(|a, b| a.id.cmp(&b.id));
@@ -334,7 +446,10 @@ bare = false
         assert_eq!(r.selection.plugins, vec!["web-a11y".to_string()]);
         assert_eq!(r.run_profile.model.as_deref(), Some("sonnet"));
         assert_eq!(r.run_profile.setting_sources.len(), 2);
-        assert_eq!(r.resolution.materialization, MaterializationMode::TempOverlay);
+        assert_eq!(
+            r.resolution.materialization,
+            MaterializationMode::TempOverlay
+        );
     }
 
     #[test]
@@ -399,7 +514,10 @@ id = "min"
         let r = ClaudeRoster::from_toml_str(&path, minimal).unwrap();
         assert!(r.selection.plugins.is_empty());
         assert!(r.run_profile.setting_sources.is_empty());
-        assert_eq!(r.resolution.materialization, MaterializationMode::TempOverlay);
+        assert_eq!(
+            r.resolution.materialization,
+            MaterializationMode::TempOverlay
+        );
     }
 
     #[test]
@@ -417,12 +535,10 @@ id = "min"
         let kinds: Vec<_> = entries.iter().map(|(k, _)| *k).collect();
         // Plugins come before skills which come before agents, etc.
         assert!(
-            kinds.iter().position(|k| *k == "plugin")
-                < kinds.iter().position(|k| *k == "skill")
+            kinds.iter().position(|k| *k == "plugin") < kinds.iter().position(|k| *k == "skill")
         );
         assert!(
-            kinds.iter().position(|k| *k == "skill")
-                < kinds.iter().position(|k| *k == "agent")
+            kinds.iter().position(|k| *k == "skill") < kinds.iter().position(|k| *k == "agent")
         );
     }
 

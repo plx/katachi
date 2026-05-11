@@ -29,3 +29,25 @@ impl From<ExitCode> for std::process::ExitCode {
         std::process::ExitCode::from(c as u8)
     }
 }
+
+/// Emit a structured "not implemented" error for the given command label.
+/// Honors `--json` by writing a parseable error object on stdout; falls
+/// back to a stderr line otherwise.
+pub fn emit_not_implemented(json: bool, label: &str) -> ExitCode {
+    let message = format!("`{label}` is not yet implemented in this phase");
+    if json {
+        let payload = serde_json::json!({
+            "error": {
+                "kind": "not_implemented",
+                "command": label,
+                "message": message,
+            }
+        });
+        if serde_json::to_writer_pretty(std::io::stdout(), &payload).is_ok() {
+            println!();
+        }
+    } else {
+        eprintln!("katachi: {message}");
+    }
+    ExitCode::NotImplemented
+}

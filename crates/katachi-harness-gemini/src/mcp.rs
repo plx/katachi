@@ -61,9 +61,7 @@ impl McpOwner {
 }
 
 /// Parse extension-provided MCP servers from a manifest.
-pub fn parse_extension_manifest_servers(
-    manifest: &ExtensionManifest,
-) -> Option<Vec<McpServer>> {
+pub fn parse_extension_manifest_servers(manifest: &ExtensionManifest) -> Option<Vec<McpServer>> {
     parse_servers(
         &manifest.mcp_servers_raw,
         McpOwner::Extension {

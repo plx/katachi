@@ -37,7 +37,11 @@ pub struct CustomAgent {
 
 impl CustomAgent {
     pub fn item_ref(&self) -> ItemRef {
-        ItemRef::new(HarnessKind::Codex, CodexItemKind::CustomAgent.as_str(), &self.id)
+        ItemRef::new(
+            HarnessKind::Codex,
+            CodexItemKind::CustomAgent.as_str(),
+            &self.id,
+        )
     }
 
     pub fn to_item(&self) -> DiscoveredItem {
@@ -117,7 +121,11 @@ pub fn insert_agent_edges(
                     to: nearest,
                     kind: EdgeKind::Semantic,
                     required: false,
-                    note: Some(CodexEdgeKind::AgentInheritsSessionDefaults.as_str().to_string()),
+                    note: Some(
+                        CodexEdgeKind::AgentInheritsSessionDefaults
+                            .as_str()
+                            .to_string(),
+                    ),
                 };
                 insert_edge(catalog, edge, diagnostics);
             }
@@ -281,9 +289,7 @@ fn toml_to_json(value: &toml::Value) -> serde_json::Value {
             .unwrap_or(serde_json::Value::Null),
         toml::Value::Boolean(b) => serde_json::Value::Bool(*b),
         toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
-        toml::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(toml_to_json).collect())
-        }
+        toml::Value::Array(arr) => serde_json::Value::Array(arr.iter().map(toml_to_json).collect()),
         toml::Value::Table(tbl) => {
             let mut map = serde_json::Map::new();
             for (k, v) in tbl {
@@ -329,7 +335,7 @@ inherit_session = false
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let agents = discover_agents(&settings, &[root.clone()], &mut diags);
+        let agents = discover_agents(&settings, std::slice::from_ref(&root), &mut diags);
         assert_eq!(agents.len(), 1);
         let a = &agents[0];
         assert_eq!(a.id, "readonly");
@@ -350,7 +356,7 @@ inherit_session = false
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let agents = discover_agents(&settings, &[root.clone()], &mut diags);
+        let agents = discover_agents(&settings, std::slice::from_ref(&root), &mut diags);
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].raw["source"], "yaml");
         assert!(agents[0]
@@ -371,7 +377,7 @@ inherit_session = false
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let agents = discover_agents(&settings, &[root.clone()], &mut diags);
+        let agents = discover_agents(&settings, std::slice::from_ref(&root), &mut diags);
         assert!(agents[0].inherits_session);
     }
 }

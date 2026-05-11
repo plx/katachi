@@ -4,11 +4,12 @@ mod cli;
 mod commands;
 mod exit;
 mod fixtures;
+mod harness_registry;
 mod logging;
 
 use clap::Parser;
 
-use cli::{Cli, Command, GlobalArgs, HaveAction, HaveCmd};
+use cli::{Cli, Command, GlobalArgs, HaveAction, HaveCmd, HavePlanAction};
 use exit::ExitCode;
 
 fn main() -> std::process::ExitCode {
@@ -35,7 +36,20 @@ fn dispatch(cli: Cli) -> ExitCode {
                 ExitCode::Config
             }
         },
-        other => not_yet_implemented(&global, &other),
+        Command::Run(cmd) => match commands::run::dispatch(&global, cmd) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!("katachi run: {err:#}");
+                ExitCode::Config
+            }
+        },
+        Command::Katachi(cmd) => match commands::katachi::dispatch(&global, cmd) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!("katachi katachi: {err:#}");
+                ExitCode::Config
+            }
+        },
     }
 }
 
@@ -48,14 +62,44 @@ fn dispatch_have(global: &GlobalArgs, have: HaveCmd) -> ExitCode {
                 ExitCode::Config
             }
         },
-        _ => not_yet_implemented(global, &Command::Have(have)),
+        HaveAction::Graph { format } => {
+            let format = *format;
+            match commands::have::run_graph(global, &have, format) {
+                Ok(code) => code,
+                Err(err) => {
+                    eprintln!("katachi have: {err:#}");
+                    ExitCode::Config
+                }
+            }
+        }
+        HaveAction::Plan {
+            what: HavePlanAction::Execute { prompt },
+        } => {
+            let prompt = prompt.clone();
+            match commands::have::run_plan_execute(global, &have, &prompt) {
+                Ok(code) => code,
+                Err(err) => {
+                    eprintln!("katachi have plan: {err:#}");
+                    ExitCode::Config
+                }
+            }
+        }
+        HaveAction::Execute { prompt } => {
+            let prompt = prompt.clone();
+            match commands::have::run_execute(global, &have, &prompt) {
+                Ok(code) => code,
+                Err(err) => {
+                    eprintln!("katachi have execute: {err:#}");
+                    ExitCode::Config
+                }
+            }
+        }
     }
 }
 
-fn not_yet_implemented(_global: &GlobalArgs, cmd: &Command) -> ExitCode {
-    let label = describe_command(cmd);
-    eprintln!("katachi: `{label}` is not yet implemented in this phase");
-    ExitCode::NotImplemented
+#[allow(dead_code)]
+fn not_yet_implemented(global: &GlobalArgs, cmd: &Command) -> ExitCode {
+    exit::emit_not_implemented(global.json, &describe_command(cmd))
 }
 
 fn describe_command(cmd: &Command) -> String {

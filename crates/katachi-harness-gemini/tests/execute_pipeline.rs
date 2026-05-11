@@ -12,8 +12,7 @@ use katachi_core::harness::{ExecuteContext, HarnessModule, PlanContext};
 use katachi_core::model::{BackendKind, HarnessKind, ItemRef};
 use katachi_core::persist::RunDirectory;
 use katachi_core::plan::{
-    ActionRequest, InvocationRequest, ResolvedItemRef, ResolvedKatachi, RunProfile,
-    SelectionReason,
+    ActionRequest, InvocationRequest, ResolvedItemRef, ResolvedKatachi, RunProfile, SelectionReason,
 };
 use katachi_core::record::{Outcome, RunId};
 use katachi_harness_gemini::plan::{build_cli_plan_with_overlay, GeminiRunProfile};
@@ -124,7 +123,10 @@ fn end_to_end_execute_produces_record_and_sidecar() {
     assert!(transcript.exists(), "transcript should be written");
     let raw = fs::read_to_string(&transcript).unwrap();
     let lines: Vec<&str> = raw.lines().collect();
-    assert!(lines.len() >= 6, "should have at least 6 events, got: {raw}");
+    assert!(
+        lines.len() >= 6,
+        "should have at least 6 events, got: {raw}"
+    );
 
     // Gemini sidecar should also be present because transcript_mode was
     // JsonStream.
@@ -188,7 +190,10 @@ fn raw_only_plan_has_no_sidecar() {
         None,
     )
     .unwrap();
-    assert_eq!(plan.transcript_mode, katachi_core::plan::TranscriptMode::RawOnly);
+    assert_eq!(
+        plan.transcript_mode,
+        katachi_core::plan::TranscriptMode::RawOnly
+    );
 
     let run_dir = RunDirectory::create(&runs_root_utf8, run_id).unwrap();
     let harness = GeminiHarness::new();

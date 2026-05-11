@@ -15,7 +15,7 @@ use camino::Utf8PathBuf;
 use katachi_core::error::ExecutionError;
 use katachi_core::execute;
 use katachi_core::harness::ExecuteContext;
-use katachi_core::persist::{FILE_TRANSCRIPT, PersistError};
+use katachi_core::persist::{PersistError, FILE_TRANSCRIPT};
 use katachi_core::plan::TranscriptMode;
 use katachi_core::record::ExecutionRecord;
 use katachi_core::transcript::{EventKind, TranscriptEvent};
@@ -23,7 +23,16 @@ use katachi_core::transcript::{EventKind, TranscriptEvent};
 use crate::transcript as gemini_transcript;
 
 pub fn run(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> {
-    let record = execute::run(ctx)?;
+    let normalizer: Box<dyn Fn(&str) -> EventKind + Send + Sync> = Box::new(|line| {
+        let mut events = gemini_transcript::parse_line(line);
+        if events.is_empty() {
+            return EventKind::StdoutText {
+                text: line.to_string(),
+            };
+        }
+        events.remove(0)
+    });
+    let record = execute::run_with_normalizer(ctx, Some(normalizer.as_ref()))?;
     // Only produce the Gemini sidecar if the plan was configured for
     // JSON streaming in the first place. Raw-only runs have nothing
     // gemini-specific to project.
@@ -39,26 +48,21 @@ pub fn run(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> 
 const SIDECAR_NAME: &str = "transcript.gemini.jsonl";
 
 fn write_sidecar(ctx: &ExecuteContext<'_>) -> Result<(), SidecarError> {
-    let transcript_path: Utf8PathBuf = ctx
-        .run_dir
-        .partial_path()
-        .join(FILE_TRANSCRIPT);
+    let transcript_path: Utf8PathBuf = ctx.run_dir.partial_path().join(FILE_TRANSCRIPT);
     if !transcript_path.exists() {
         return Ok(());
     }
     let sidecar_path = ctx.run_dir.partial_path().join(SIDECAR_NAME);
-    let file = fs::File::open(transcript_path.as_std_path()).map_err(|source| {
-        SidecarError::Open {
+    let file =
+        fs::File::open(transcript_path.as_std_path()).map_err(|source| SidecarError::Open {
             path: transcript_path.clone(),
             source,
-        }
-    })?;
-    let out = fs::File::create(sidecar_path.as_std_path()).map_err(|source| {
-        SidecarError::Create {
+        })?;
+    let out =
+        fs::File::create(sidecar_path.as_std_path()).map_err(|source| SidecarError::Create {
             path: sidecar_path.clone(),
             source,
-        }
-    })?;
+        })?;
     let mut writer = std::io::BufWriter::new(out);
     let reader = BufReader::new(file);
     let mut next_seq: u64 = 0;
@@ -98,11 +102,14 @@ fn write_sidecar(ctx: &ExecuteContext<'_>) -> Result<(), SidecarError> {
 }
 
 fn write_event<W: Write>(writer: &mut W, event: &TranscriptEvent) -> Result<(), SidecarError> {
-    serde_json::to_writer(&mut *writer, event).map_err(|source| SidecarError::Serialize { source })?;
-    writer.write_all(b"\n").map_err(|source| SidecarError::Write {
-        path: Utf8PathBuf::from(""),
-        source,
-    })?;
+    serde_json::to_writer(&mut *writer, event)
+        .map_err(|source| SidecarError::Serialize { source })?;
+    writer
+        .write_all(b"\n")
+        .map_err(|source| SidecarError::Write {
+            path: Utf8PathBuf::from(""),
+            source,
+        })?;
     Ok(())
 }
 

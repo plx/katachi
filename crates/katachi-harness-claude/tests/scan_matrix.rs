@@ -11,14 +11,14 @@
 //! diagnostic wiring is exercised end-to-end.
 
 use camino::Utf8PathBuf;
+use katachi_core::harness::RosterCatalog;
+use katachi_core::model::BackendKind;
 use katachi_harness_claude::config::ClaudeConfig;
 use katachi_harness_claude::discovery::scan_from_roots;
 use katachi_harness_claude::paths::{ClaudeDir, ClaudeScope, DiscoveredRoots, ScopedPath};
 use katachi_harness_claude::resolve::resolve_roster;
 use katachi_harness_claude::roster::ClaudeRoster;
 use katachi_harness_claude::sdk;
-use katachi_core::harness::RosterCatalog;
-use katachi_core::model::BackendKind;
 use std::fs;
 use tempfile::TempDir;
 
@@ -244,9 +244,7 @@ fn sdk_projection_loss_for_file_hook() {
         r#"{"hooks": {"PreToolUse": [{"command": "echo"}]}}"#,
     );
     let catalog = scan(&roots_for(&project, None));
-    assert!(catalog
-        .iter_items()
-        .any(|(ir, _)| ir.kind == "hook_set"));
+    assert!(catalog.iter_items().any(|(ir, _)| ir.kind == "hook_set"));
 
     // Build a roster that selects the hook and project onto SDK; expect
     // a projection-loss warning.

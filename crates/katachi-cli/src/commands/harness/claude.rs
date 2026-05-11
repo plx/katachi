@@ -11,8 +11,8 @@ use katachi_core::diagnostic::{Diagnostic, Severity};
 use katachi_core::harness::{ExplainContext, HarnessModule, ScanContext};
 use katachi_core::model::{BackendKind, ItemRef, MaterializationMode};
 use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides};
-use katachi_core::persist::RunDirectory;
-use katachi_core::plan::{ActionRequest, ExecutionPlan, InvocationRequest};
+use katachi_core::persist::{finalize_run_directory, CommitPolicy, RunDirectory};
+use katachi_core::plan::{ActionRequest, ExecutionPlan, FileSource, InvocationRequest};
 use katachi_core::record::RunId;
 
 use katachi_harness_claude::config::ClaudeConfig;
@@ -47,13 +47,9 @@ pub fn dispatch(global: &GlobalArgs, action: HarnessAction) -> Result<ExitCode> 
         HarnessAction::Doctor => run_doctor(global, &ctx),
         HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, &ctx, &roster_id),
         HarnessAction::Project { roster_id, sdk } => run_project(global, &ctx, &roster_id, sdk),
-        HarnessAction::DumpSettings { .. } => {
-            eprintln!("katachi: `harness claude dump-settings` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
-        HarnessAction::EffectiveConfig { .. } => {
-            eprintln!("katachi: `harness claude effective-config` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
+        HarnessAction::DumpSettings { roster_id } => run_dump_settings(global, &ctx, &roster_id),
+        HarnessAction::EffectiveConfig { roster_id } => {
+            run_effective_config(global, &ctx, &roster_id)
         }
     }
 }
@@ -118,10 +114,7 @@ fn run_doctor(global: &GlobalArgs, ctx: &ClaudeCtx) -> Result<ExitCode> {
         println!("claude doctor");
         println!("  binary     : {binary}");
         if found {
-            println!(
-                "  resolved   : {}",
-                resolved.as_deref().unwrap_or("?")
-            );
+            println!("  resolved   : {}", resolved.as_deref().unwrap_or("?"));
         } else {
             println!("  resolved   : not found on PATH");
         }
@@ -141,6 +134,180 @@ fn run_doctor(global: &GlobalArgs, ctx: &ClaudeCtx) -> Result<ExitCode> {
     } else {
         Ok(ExitCode::Ok)
     }
+}
+
+fn run_dump_settings(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> Result<ExitCode> {
+    let (resolved, _) = match resolve_for_roster(global, ctx, roster_id) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("katachi harness claude dump-settings: {err:#}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let plan = match build_plan_from_resolved(global, ctx, &resolved, None) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("katachi harness claude dump-settings: {err:#}");
+            return Ok(ExitCode::Plan);
+        }
+    };
+    let overlay_files: Vec<_> = plan
+        .materialization
+        .files
+        .iter()
+        .map(|f| {
+            let (source, inline_bytes, inline_json) = match &f.source {
+                FileSource::Inline { contents } => (
+                    "inline",
+                    Some(contents.len()),
+                    serde_json::from_str::<serde_json::Value>(contents).ok(),
+                ),
+                FileSource::CopyFrom { .. } => ("copy_from", None, None),
+                FileSource::SymlinkTo { .. } => ("symlink_to", None, None),
+            };
+            serde_json::json!({
+                "dest": f.dest.to_string(),
+                "source": source,
+                "inline_bytes": inline_bytes,
+                "inline_json": inline_json,
+            })
+        })
+        .collect();
+    let merged_settings = overlay_files
+        .iter()
+        .find(|f| f["dest"].as_str().unwrap_or("").ends_with("settings.json"))
+        .and_then(|f| f.get("inline_json").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let merged_mcp = overlay_files
+        .iter()
+        .find(|f| f["dest"].as_str().unwrap_or("").ends_with("mcp.json"))
+        .and_then(|f| f.get("inline_json").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let selected_hooks: Vec<_> = resolved
+        .resolved
+        .selected_items
+        .iter()
+        .filter(|i| i.item.kind == "hook_set")
+        .map(|i| i.item.to_string())
+        .collect();
+    let payload = serde_json::json!({
+        "roster": resolved.roster.id,
+        "model": resolved.roster.run_profile.model,
+        "permission_mode": resolved.roster.run_profile.permission_mode,
+        "output_format": resolved.roster.run_profile.output_format,
+        "allowed_tools": resolved.roster.run_profile.allowed_tools,
+        "disallowed_tools": resolved.roster.run_profile.disallowed_tools,
+        "setting_sources": resolved.roster.run_profile.setting_sources,
+        "settings": merged_settings,
+        "mcp": merged_mcp,
+        "selected_hooks": selected_hooks,
+        "overlay_files": overlay_files,
+        "diagnostics": resolved.resolved.diagnostics,
+        "argv": plan.execution.argv,
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", resolved.roster.id);
+        if let Some(m) = &resolved.roster.run_profile.model {
+            println!("model: {m}");
+        }
+        if let Some(pm) = &resolved.roster.run_profile.permission_mode {
+            println!("permission_mode: {pm}");
+        }
+        if !resolved.roster.run_profile.allowed_tools.is_empty() {
+            println!(
+                "allowed_tools: {:?}",
+                resolved.roster.run_profile.allowed_tools
+            );
+        }
+        if !resolved.roster.run_profile.disallowed_tools.is_empty() {
+            println!(
+                "disallowed_tools: {:?}",
+                resolved.roster.run_profile.disallowed_tools
+            );
+        }
+        println!("overlay files: {}", overlay_files.len());
+    }
+    Ok(ExitCode::Ok)
+}
+
+fn run_effective_config(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> Result<ExitCode> {
+    let (resolved, _) = match resolve_for_roster(global, ctx, roster_id) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("katachi harness claude effective-config: {err:#}");
+            return Ok(ExitCode::Resolve);
+        }
+    };
+    let plan = match build_plan_from_resolved(global, ctx, &resolved, None) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("katachi harness claude effective-config: {err:#}");
+            return Ok(ExitCode::Plan);
+        }
+    };
+    let overlay_files: Vec<_> = plan
+        .materialization
+        .files
+        .iter()
+        .map(|f| {
+            let (source, inline_bytes) = match &f.source {
+                FileSource::Inline { contents } => ("inline", Some(contents.len())),
+                FileSource::CopyFrom { .. } => ("copy_from", None),
+                FileSource::SymlinkTo { .. } => ("symlink_to", None),
+            };
+            serde_json::json!({
+                "dest": f.dest.to_string(),
+                "source": source,
+                "inline_bytes": inline_bytes,
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "roster": resolved.roster.id,
+        "harness": plan.harness,
+        "backend": plan.backend,
+        "materialization": {
+            "mode": format!("{:?}", plan.materialization.mode),
+            "files": overlay_files,
+            "overlay_root": plan.materialization.overlay_root,
+            "env": plan.materialization.env,
+        },
+        "model": resolved.roster.run_profile.model,
+        "permission_mode": resolved.roster.run_profile.permission_mode,
+        "output_format": resolved.roster.run_profile.output_format,
+        "allowed_tools": resolved.roster.run_profile.allowed_tools,
+        "disallowed_tools": resolved.roster.run_profile.disallowed_tools,
+        "system_prompt": resolved.roster.run_profile.system_prompt,
+        "append_system_prompt": resolved.roster.run_profile.append_system_prompt,
+        "timeout_secs": resolved.roster.run_profile.timeout_secs,
+        "argv": plan.execution.argv,
+        "env": plan.execution.env,
+        "cwd": plan.execution.cwd,
+        "diagnostics": resolved.resolved.diagnostics,
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", resolved.roster.id);
+        println!("backend: {} ({})", plan.backend, plan.harness);
+        println!(
+            "materialization: {:?} ({} file(s))",
+            plan.materialization.mode,
+            plan.materialization.files.len()
+        );
+        if let Some(m) = &resolved.roster.run_profile.model {
+            println!("model: {m}");
+        }
+        println!("argv:");
+        for a in &plan.execution.argv {
+            println!("  {a}");
+        }
+    }
+    Ok(ExitCode::Ok)
 }
 
 fn run_dump_roster(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> Result<ExitCode> {
@@ -168,9 +335,19 @@ fn run_dump_roster(global: &GlobalArgs, ctx: &ClaudeCtx, roster_id: &str) -> Res
             serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".into())
         );
     }
-    let has_errors = validator_diags.iter().any(|d| d.severity == Severity::Error)
-        || resolved.resolved.diagnostics.iter().any(|d| d.severity == Severity::Error);
-    Ok(if has_errors { ExitCode::Validate } else { ExitCode::Ok })
+    let has_errors = validator_diags
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+        || resolved
+            .resolved
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error);
+    Ok(if has_errors {
+        ExitCode::Validate
+    } else {
+        ExitCode::Ok
+    })
 }
 
 fn run_project(
@@ -212,7 +389,11 @@ fn run_project(
         .diagnostics
         .iter()
         .any(|d| d.severity == Severity::Error);
-    Ok(if has_errors { ExitCode::Plan } else { ExitCode::Ok })
+    Ok(if has_errors {
+        ExitCode::Plan
+    } else {
+        ExitCode::Ok
+    })
 }
 
 fn run_scan(global: &GlobalArgs, ctx: &ClaudeCtx) -> Result<ExitCode> {
@@ -297,14 +478,15 @@ fn resolve_backend(
     roster: &katachi_harness_claude::roster::ClaudeRoster,
     claude_config: &ClaudeConfig,
 ) -> BackendKind {
-    // CLI `--prefer-backend` wins over roster/config defaults.
+    // Backend precedence:
+    //   roster pin > --prefer-backend > config default > built-in `cli`.
+    if let Some(b) = roster.backend() {
+        return b;
+    }
     for b in &global.prefer_backend {
         if let Ok(parsed) = b.parse::<BackendKind>() {
             return parsed;
         }
-    }
-    if let Some(b) = roster.backend() {
-        return b;
     }
     if let Ok(parsed) = claude_config.default_backend.parse::<BackendKind>() {
         return parsed;
@@ -346,7 +528,7 @@ fn run_plan(
         Ok(x) => x,
         Err(err) => {
             eprintln!("katachi harness claude plan: {err:#}");
-            return Ok(ExitCode::Resolve);
+            return Ok(roster_resolution_error_code(&err));
         }
     };
     let validator_diags = validate(&resolved);
@@ -388,7 +570,7 @@ fn run_execute(
         Ok(x) => x,
         Err(err) => {
             eprintln!("katachi harness claude execute: {err:#}");
-            return Ok(ExitCode::Resolve);
+            return Ok(roster_resolution_error_code(&err));
         }
     };
     let validator_diags = validate(&resolved);
@@ -401,7 +583,10 @@ fn run_execute(
         render_diagnostics(global, &resolved.resolved.diagnostics, &validator_diags);
         return Ok(ExitCode::Resolve);
     }
-    if validator_diags.iter().any(|d| d.severity == Severity::Error) {
+    if validator_diags
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+    {
         render_diagnostics(global, &resolved.resolved.diagnostics, &validator_diags);
         return Ok(ExitCode::Validate);
     }
@@ -464,29 +649,49 @@ fn run_execute(
         started_at: time::OffsetDateTime::now_utc(),
     };
     let record_result = ctx.harness.execute(&exec_ctx);
-    // Always write manifest before committing.
-    let _ = run_dir.write_manifest();
+    let outcome = record_result.as_ref().ok().map(|rec| rec.result.outcome);
+    let finalized = finalize_run_directory(run_dir, outcome, CommitPolicy::SuccessOnly);
 
-    let mut exit = match &record_result {
-        Ok(rec) => match rec.result.outcome {
-            katachi_core::record::Outcome::Success => ExitCode::Ok,
-            katachi_core::record::Outcome::Failure
-            | katachi_core::record::Outcome::Timeout
-            | katachi_core::record::Outcome::Planned => ExitCode::Execute,
-        },
+    if let Some(err) = &finalized.manifest_error {
+        eprintln!("katachi harness claude execute: writing run manifest: {err:#}");
+        eprintln!(
+            "katachi harness claude execute: partial preserved at `{}`",
+            finalized.partial_path
+        );
+    }
+    if let Some(err) = &finalized.commit_error {
+        eprintln!("katachi harness claude execute: commit failed: {err:#}");
+        eprintln!(
+            "katachi harness claude execute: partial preserved at `{}`",
+            finalized.partial_path
+        );
+    }
+
+    let exit = match &record_result {
+        Ok(rec)
+            if rec.result.outcome == katachi_core::record::Outcome::Success
+                && finalized.is_committed() =>
+        {
+            ExitCode::Ok
+        }
+        Ok(rec) => {
+            if rec.result.outcome != katachi_core::record::Outcome::Success {
+                eprintln!(
+                    "katachi harness claude execute: partial preserved at `{}`",
+                    finalized.partial_path
+                );
+            }
+            ExitCode::Execute
+        }
         Err(err) => {
             eprintln!("katachi harness claude execute: {err:#}");
+            eprintln!(
+                "katachi harness claude execute: partial preserved at `{}`",
+                finalized.partial_path
+            );
             ExitCode::Execute
         }
     };
-
-    // Commit on success, leave partial on failure (preserves diagnostics).
-    if matches!(exit, ExitCode::Ok) {
-        if let Err(err) = run_dir.commit() {
-            eprintln!("katachi harness claude execute: commit failed: {err:#}");
-            exit = ExitCode::Execute;
-        }
-    }
 
     cleanup_overlay(
         overlay,
@@ -496,11 +701,16 @@ fn run_execute(
     Ok(exit)
 }
 
-fn cleanup_overlay(
-    overlay: Option<MaterializedOverlay>,
-    preserve_on_failure: bool,
-    success: bool,
-) {
+fn roster_resolution_error_code(err: &anyhow::Error) -> ExitCode {
+    let message = err.to_string();
+    if message.contains("load rosters:") {
+        ExitCode::Config
+    } else {
+        ExitCode::Resolve
+    }
+}
+
+fn cleanup_overlay(overlay: Option<MaterializedOverlay>, preserve_on_failure: bool, success: bool) {
     let Some(overlay) = overlay else { return };
     if !success && preserve_on_failure {
         if let MaterializedOverlay::Fixed { root } = &overlay {
@@ -726,11 +936,7 @@ fn render_plan(
     }
 }
 
-fn render_diagnostics(
-    _global: &GlobalArgs,
-    resolver: &[Diagnostic],
-    validator: &[Diagnostic],
-) {
+fn render_diagnostics(_global: &GlobalArgs, resolver: &[Diagnostic], validator: &[Diagnostic]) {
     if resolver.is_empty() && validator.is_empty() {
         return;
     }

@@ -38,7 +38,11 @@ pub struct InstructionDoc {
 
 impl InstructionDoc {
     pub fn item_ref(&self) -> ItemRef {
-        ItemRef::new(HarnessKind::Codex, CodexItemKind::InstructionDoc.as_str(), &self.id)
+        ItemRef::new(
+            HarnessKind::Codex,
+            CodexItemKind::InstructionDoc.as_str(),
+            &self.id,
+        )
     }
 
     pub fn to_item(&self) -> DiscoveredItem {
@@ -227,7 +231,8 @@ mod tests {
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let docs = discover_instruction_chain(&settings, &[root.clone()], &b, &mut diags);
+        let docs =
+            discover_instruction_chain(&settings, std::slice::from_ref(&root), &b, &mut diags);
         let bodies: Vec<_> = docs.iter().map(|d| d.body.trim().to_string()).collect();
         assert_eq!(bodies, vec!["root", "a", "b"]);
         for (i, d) in docs.iter().enumerate() {
@@ -247,7 +252,8 @@ mod tests {
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let docs = discover_instruction_chain(&settings, &[root.clone()], &root, &mut diags);
+        let docs =
+            discover_instruction_chain(&settings, std::slice::from_ref(&root), &root, &mut diags);
         let bodies: Vec<_> = docs.iter().map(|d| d.body.trim().to_string()).collect();
         assert_eq!(bodies, vec!["main", "over"]);
     }
@@ -265,7 +271,8 @@ mod tests {
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let docs = discover_instruction_chain(&settings, &[root.clone()], &root, &mut diags);
+        let docs =
+            discover_instruction_chain(&settings, std::slice::from_ref(&root), &root, &mut diags);
         let bodies: Vec<_> = docs.iter().map(|d| d.body.trim().to_string()).collect();
         assert_eq!(bodies, vec!["global", "local"]);
     }
@@ -282,7 +289,8 @@ mod tests {
             ..CodexSettings::default()
         };
         let mut diags = Vec::new();
-        let docs = discover_instruction_chain(&settings, &[root.clone()], &a, &mut diags);
+        let docs =
+            discover_instruction_chain(&settings, std::slice::from_ref(&root), &a, &mut diags);
         let mut cat = RosterCatalog::empty(HarnessKind::Codex);
         for d in &docs {
             cat.insert_item(d.to_item()).unwrap();

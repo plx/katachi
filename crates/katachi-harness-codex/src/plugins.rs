@@ -11,9 +11,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use katachi_core::diagnostic::Diagnostic;
 use katachi_core::model::{HarnessKind, ItemRef};
-use katachi_core::roster::{
-    DependencyEdge, DiscoveredItem, EdgeKind, ItemSource, PackageRef,
-};
+use katachi_core::roster::{DependencyEdge, DiscoveredItem, EdgeKind, ItemSource, PackageRef};
 
 use crate::items::{CodexEdgeKind, CodexItemKind};
 use crate::CodexSettings;
@@ -269,7 +267,10 @@ description = "A11y helpers"
 "#,
         );
         write(&plugin_dir.join("skills/axe/SKILL.md"), "skill body");
-        write(&plugin_dir.join("agents/reviewer/agent.toml"), "model = \"gpt\"");
+        write(
+            &plugin_dir.join("agents/reviewer/agent.toml"),
+            "model = \"gpt\"",
+        );
 
         let settings = CodexSettings {
             marketplace_roots: vec![marketplace],

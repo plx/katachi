@@ -97,12 +97,13 @@ impl ExtensionManifest {
         let exclude_tools: Vec<String> = body
             .get("excludeTools")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default();
-        let mcp_servers_raw = body
-            .get("mcpServers")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let mcp_servers_raw = body.get("mcpServers").cloned().unwrap_or(Value::Null);
 
         Ok(Self {
             name,
@@ -132,7 +133,8 @@ impl ExtensionDiscovery {
             out.scan_root(root);
         }
         // Stable ordering so snapshots/tests don't flake on fs walk order.
-        out.extensions.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
+        out.extensions
+            .sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
         out
     }
 
@@ -171,15 +173,17 @@ impl ExtensionDiscovery {
 
 fn parse_extension(root: &Utf8Path) -> Result<DiscoveredExtension, ExtensionError> {
     let manifest_path = root.join(EXTENSION_MANIFEST);
-    let raw = fs::read_to_string(manifest_path.as_std_path())
-        .map_err(|source| ExtensionError::ReadManifest {
+    let raw = fs::read_to_string(manifest_path.as_std_path()).map_err(|source| {
+        ExtensionError::ReadManifest {
+            path: manifest_path.clone(),
+            source,
+        }
+    })?;
+    let body: Value =
+        serde_json::from_str(&raw).map_err(|source| ExtensionError::ParseManifest {
             path: manifest_path.clone(),
             source,
         })?;
-    let body: Value = serde_json::from_str(&raw).map_err(|source| ExtensionError::ParseManifest {
-        path: manifest_path.clone(),
-        source,
-    })?;
     let manifest = ExtensionManifest::from_json(body)?;
 
     // Extension-local GEMINI.md (or configured name).
@@ -207,8 +211,7 @@ fn parse_extension(root: &Utf8Path) -> Result<DiscoveredExtension, ExtensionErro
     let hook_sets = crate::hook::scan_dir(&root.join("hooks"), &manifest.name).unwrap_or_default();
     let policy_sets =
         crate::policy::scan_dir(&root.join("policies"), &manifest.name).unwrap_or_default();
-    let mcp_servers = crate::mcp::parse_extension_manifest_servers(&manifest)
-        .unwrap_or_default();
+    let mcp_servers = crate::mcp::parse_extension_manifest_servers(&manifest).unwrap_or_default();
 
     let themes = list_files_or_empty(&root.join("themes"));
     let commands = list_files_or_empty(&root.join("commands"));
@@ -350,7 +353,10 @@ mod tests {
     fn manifest_missing_name_errors() {
         let body = serde_json::json!({"version": "1.0.0"});
         let err = ExtensionManifest::from_json(body).unwrap_err();
-        assert!(matches!(err, ExtensionError::MissingManifestField { field: "name" }));
+        assert!(matches!(
+            err,
+            ExtensionError::MissingManifestField { field: "name" }
+        ));
     }
 
     #[test]
@@ -389,8 +395,7 @@ mod tests {
 
     #[test]
     fn missing_root_produces_no_extensions() {
-        let out =
-            ExtensionDiscovery::discover(&[Utf8PathBuf::from("/definitely/not/here/ever")]);
+        let out = ExtensionDiscovery::discover(&[Utf8PathBuf::from("/definitely/not/here/ever")]);
         assert!(out.extensions.is_empty());
         // Missing root is silent — not an error.
         assert!(out.errors.is_empty());

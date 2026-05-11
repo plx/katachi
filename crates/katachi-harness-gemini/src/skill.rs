@@ -56,7 +56,12 @@ impl SkillOwner {
 /// - `<skills>/<id>.md`
 /// - `<skills>/<id>/SKILL.md` (or first `*.md` found)
 pub fn scan_dir(dir: &Utf8Path, extension_name: &str) -> Option<Vec<Skill>> {
-    scan_dir_with_owner(dir, SkillOwner::Extension { extension: extension_name.to_owned() })
+    scan_dir_with_owner(
+        dir,
+        SkillOwner::Extension {
+            extension: extension_name.to_owned(),
+        },
+    )
 }
 
 pub fn scan_user_dir(dir: &Utf8Path) -> Option<Vec<Skill>> {
@@ -104,15 +109,18 @@ fn scan_dir_with_owner(dir: &Utf8Path, owner: SkillOwner) -> Option<Vec<Skill>> 
 }
 
 fn first_md_in(dir: &Utf8Path) -> Option<Utf8PathBuf> {
-    fs::read_dir(dir.as_std_path()).ok()?.filter_map(|entry| {
-        let entry = entry.ok()?;
-        let p = Utf8PathBuf::from_path_buf(entry.path()).ok()?;
-        if p.extension() == Some("md") {
-            Some(p)
-        } else {
-            None
-        }
-    }).next()
+    fs::read_dir(dir.as_std_path())
+        .ok()?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let p = Utf8PathBuf::from_path_buf(entry.path()).ok()?;
+            if p.extension() == Some("md") {
+                Some(p)
+            } else {
+                None
+            }
+        })
+        .next()
 }
 
 fn parse_file(path: &Utf8Path, owner: &SkillOwner) -> Option<Skill> {
@@ -259,7 +267,11 @@ pub fn to_discovered_item(skill: &Skill) -> DiscoveredItem {
         _ => None,
     };
     DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Gemini, GeminiItemKind::Skill.as_str(), skill.id.clone()),
+        item_ref: ItemRef::new(
+            HarnessKind::Gemini,
+            GeminiItemKind::Skill.as_str(),
+            skill.id.clone(),
+        ),
         display_name: skill.id.clone(),
         source: ItemSource {
             path: Some(skill.path.clone()),
@@ -335,7 +347,11 @@ mod tests {
     fn scan_picks_up_nested_skill_md() {
         let tmp = TempDir::new().unwrap();
         let dir = utf8(&tmp);
-        write(&dir, "accessibility-audit/SKILL.md", "---\ndescription: a11y audit\n---\nbody\n");
+        write(
+            &dir,
+            "accessibility-audit/SKILL.md",
+            "---\ndescription: a11y audit\n---\nbody\n",
+        );
 
         let skills = scan_dir(&dir, "workspace-a11y").unwrap();
         assert_eq!(skills.len(), 1);

@@ -44,7 +44,11 @@ pub struct RuleSet {
 
 impl RuleSet {
     pub fn item_ref(&self) -> ItemRef {
-        ItemRef::new(HarnessKind::Codex, CodexItemKind::RuleSet.as_str(), &self.id)
+        ItemRef::new(
+            HarnessKind::Codex,
+            CodexItemKind::RuleSet.as_str(),
+            &self.id,
+        )
     }
 
     pub fn to_item(&self) -> DiscoveredItem {
@@ -71,10 +75,7 @@ impl RuleSet {
 }
 
 /// Find every rule file beside each config layer's `rules/` directory.
-pub fn discover_rules(
-    layers: &[ConfigLayer],
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<RuleSet> {
+pub fn discover_rules(layers: &[ConfigLayer], diagnostics: &mut Vec<Diagnostic>) -> Vec<RuleSet> {
     let mut out: Vec<RuleSet> = Vec::new();
     for layer in layers {
         let Some(parent) = layer.path.parent() else {

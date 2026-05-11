@@ -10,7 +10,7 @@ use katachi_core::diagnostic::{any_error, Diagnostic};
 use katachi_core::harness::{ExecuteContext, ExplainContext, HarnessModule};
 use katachi_core::model::{BackendKind, ItemRef, MaterializationMode};
 use katachi_core::paths::{resolve_config_file, resolve_storage_paths, PathOverrides};
-use katachi_core::persist::RunDirectory;
+use katachi_core::persist::{finalize_run_directory, CommitPolicy, RunDirectory};
 use katachi_core::plan::{ActionRequest, InvocationRequest};
 use katachi_core::record::RunId;
 use katachi_core::roster::RosterCatalog;
@@ -24,7 +24,7 @@ use katachi_harness_codex::projection::analyze as analyze_projection;
 use katachi_harness_codex::roster_file::{load_rosters_dir, CodexRosterFile};
 use katachi_harness_codex::CodexSettings;
 
-use crate::cli::{GlobalArgs, HarnessAction, HarnessCmd, HarnessPlanAction};
+use crate::cli::{GlobalArgs, HarnessAction, HarnessCmd, HarnessPlanAction, SdkTarget};
 use crate::exit::ExitCode;
 
 pub fn dispatch(global: &GlobalArgs, cmd: &HarnessCmd) -> Result<ExitCode> {
@@ -35,21 +35,10 @@ pub fn dispatch(global: &GlobalArgs, cmd: &HarnessCmd) -> Result<ExitCode> {
         HarnessAction::EffectiveConfig { roster_id } => run_effective_config(global, roster_id),
         HarnessAction::Doctor => run_doctor(global),
         HarnessAction::Plan { roster_id, what } => run_plan(global, roster_id, what),
-        HarnessAction::Execute { roster_id, prompt } => {
-            run_execute(global, roster_id, prompt)
-        }
-        HarnessAction::DumpSettings { .. } => {
-            eprintln!("katachi: `harness codex dump-settings` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
-        HarnessAction::DumpRoster { .. } => {
-            eprintln!("katachi: `harness codex dump-roster` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
-        HarnessAction::Project { .. } => {
-            eprintln!("katachi: `harness codex project` is not yet implemented");
-            Ok(ExitCode::NotImplemented)
-        }
+        HarnessAction::Execute { roster_id, prompt } => run_execute(global, roster_id, prompt),
+        HarnessAction::DumpSettings { roster_id } => run_dump_settings(global, roster_id),
+        HarnessAction::DumpRoster { roster_id } => run_dump_roster(global, roster_id),
+        HarnessAction::Project { roster_id, sdk } => run_project(global, roster_id, *sdk),
     }
 }
 
@@ -92,10 +81,7 @@ pub fn run_explain(global: &GlobalArgs, item_id: &str) -> Result<ExitCode> {
     }
 }
 
-pub fn run_graph(
-    global: &GlobalArgs,
-    format: crate::cli::GraphFormat,
-) -> Result<ExitCode> {
+pub fn run_graph(global: &GlobalArgs, format: crate::cli::GraphFormat) -> Result<ExitCode> {
     let ctx = prepare(global)?;
     use crate::cli::GraphFormat;
     match format {
@@ -120,20 +106,191 @@ pub fn run_effective_config(global: &GlobalArgs, roster_id: &str) -> Result<Exit
     Ok(ExitCode::Ok)
 }
 
+pub fn run_dump_roster(global: &GlobalArgs, roster_id: &str) -> Result<ExitCode> {
+    let bundle = build_bundle(global, roster_id)?;
+    let payload = serde_json::json!({
+        "roster": &bundle.roster,
+        "effective": &bundle.effective,
+        "validation": &bundle.validation,
+        "selected": bundle
+            .resolved_items
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", bundle.roster.id);
+        if let Some(desc) = &bundle.roster.description {
+            println!("description: {desc}");
+        }
+        println!("selected items: {}", bundle.resolved_items.len());
+        for item in &bundle.resolved_items {
+            println!("  - {item}");
+        }
+        if !bundle.validation.is_empty() {
+            println!();
+            println!("validation:");
+            for d in &bundle.validation {
+                println!("  [{:?}] {}: {}", d.severity, d.code, d.message);
+            }
+        }
+    }
+    if any_error(&bundle.validation) {
+        return Ok(ExitCode::Validate);
+    }
+    Ok(ExitCode::Ok)
+}
+
+pub fn run_dump_settings(global: &GlobalArgs, roster_id: &str) -> Result<ExitCode> {
+    // For Codex, the layered effective config IS the dump-settings view.
+    // We report the layer order plus the merged policy.
+    let bundle = build_bundle(global, roster_id)?;
+    let payload = serde_json::json!({
+        "roster": bundle.roster.id,
+        "layer_order": bundle.effective.layer_order,
+        "active_profile": bundle.effective.active_profile,
+        "policy": bundle.effective.policy,
+        "mcp_servers": bundle.effective.mcp_servers.keys().collect::<Vec<_>>(),
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("roster: {}", bundle.roster.id);
+        println!("layer order: {:?}", bundle.effective.layer_order);
+        println!("active profile: {:?}", bundle.effective.active_profile);
+        println!(
+            "policy.approval: {:?}",
+            bundle.effective.policy.approval_policy
+        );
+        println!(
+            "policy.sandbox:  {:?}",
+            bundle.effective.policy.sandbox_mode
+        );
+        println!("policy.model:    {:?}", bundle.effective.policy.model);
+    }
+    Ok(ExitCode::Ok)
+}
+
+pub fn run_project(global: &GlobalArgs, roster_id: &str, sdk: SdkTarget) -> Result<ExitCode> {
+    let mut bundle = build_bundle(global, roster_id)?;
+    bundle.backend = match sdk {
+        SdkTarget::Ts => BackendKind::SdkTs,
+        SdkTarget::Py => BackendKind::SdkPy,
+    };
+    let projection = analyze_projection(
+        bundle.backend,
+        &bundle.roster,
+        &bundle.effective,
+        &bundle.settings,
+    );
+    let blocking_projection = any_error(&projection);
+    let planned = if blocking_projection {
+        None
+    } else {
+        Some(plan_with_bundle(&bundle, String::new(), global)?)
+    };
+    let code = match sdk {
+        SdkTarget::Ts => codex_ts_project_code(&bundle),
+        SdkTarget::Py => codex_py_project_code(&bundle),
+    };
+    let payload = serde_json::json!({
+        "roster": &bundle.roster.id,
+        "sdk": match sdk { SdkTarget::Ts => "ts", SdkTarget::Py => "py" },
+        "backend": bundle.backend,
+        "code": code,
+        "diagnostics": &projection,
+        "validation": &bundle.validation,
+        "argv": planned.as_ref().map(|p| p.planned.command.clone()).unwrap_or_default(),
+    });
+    if global.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &payload)?;
+        println!();
+    } else {
+        println!("{}", payload["code"].as_str().unwrap_or(""));
+        let diagnostics = payload["diagnostics"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if !diagnostics.is_empty() {
+            println!();
+            println!("diagnostics:");
+            for d in &diagnostics {
+                if let Some(code) = d.get("code").and_then(|v| v.as_str()) {
+                    let message = d.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    println!("  {code}: {message}");
+                }
+            }
+        }
+    }
+    if any_error(&bundle.validation) {
+        return Ok(ExitCode::Validate);
+    }
+    if blocking_projection {
+        return Ok(ExitCode::Plan);
+    }
+    Ok(ExitCode::Ok)
+}
+
+fn codex_ts_project_code(bundle: &BuiltBundle) -> String {
+    let policy = &bundle.effective.policy;
+    let mut options = serde_json::Map::new();
+    options.insert("prompt".into(), serde_json::json!(""));
+    options.insert("cd".into(), serde_json::json!("."));
+    if let Some(model) = &policy.model {
+        options.insert("model".into(), serde_json::json!(model));
+    }
+    if let Some(profile) = &policy.profile {
+        options.insert("profile".into(), serde_json::json!(profile));
+    }
+    if let Some(approval) = &policy.approval_policy {
+        options.insert("approvalPolicy".into(), serde_json::json!(approval));
+    }
+    if let Some(sandbox) = &policy.sandbox_mode {
+        options.insert("sandboxMode".into(), serde_json::json!(sandbox));
+    }
+    format!(
+        "import {{ run }} from '@openai/codex-sdk';\n\nawait run({});\n",
+        serde_json::to_string_pretty(&serde_json::Value::Object(options)).unwrap_or_default()
+    )
+}
+
+fn codex_py_project_code(bundle: &BuiltBundle) -> String {
+    let policy = &bundle.effective.policy;
+    let mut kwargs = vec!["prompt=\"\"".to_string(), "cd=\".\"".to_string()];
+    if let Some(model) = &policy.model {
+        kwargs.push(format!("model={model:?}"));
+    }
+    if let Some(profile) = &policy.profile {
+        kwargs.push(format!("profile={profile:?}"));
+    }
+    if let Some(approval) = &policy.approval_policy {
+        kwargs.push(format!("approval_policy={approval:?}"));
+    }
+    if let Some(sandbox) = &policy.sandbox_mode {
+        kwargs.push(format!("sandbox_mode={sandbox:?}"));
+    }
+    format!("from codex_sdk import run\n\nrun({})\n", kwargs.join(", "))
+}
+
 pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
     let ctx = prepare(global)?;
     let settings = ctx.settings.clone();
 
-    let mut report = DoctorReport::default();
-    report.binary = settings.binary.clone();
-    report.binary_on_path = which::which(&settings.binary).is_ok();
-    report.codex_home = settings.codex_home.clone();
-    report.codex_home_exists = settings.codex_home.exists();
-    report.project_roots = resolve_project_roots(&settings.project_roots, &ctx.cwd);
-    report.respect_project_trust = settings.respect_project_trust;
-    report.enable_python_sdk = settings.enable_python_sdk;
-    report.counts_by_kind = count_by_kind(&ctx.catalog);
-    report.diagnostics = ctx.catalog.diagnostics.clone();
+    let report = DoctorReport {
+        binary: settings.binary.clone(),
+        binary_on_path: which::which(&settings.binary).is_ok(),
+        codex_home: settings.codex_home.clone(),
+        codex_home_exists: settings.codex_home.exists(),
+        project_roots: resolve_project_roots(&settings.project_roots, &ctx.cwd),
+        respect_project_trust: settings.respect_project_trust,
+        enable_python_sdk: settings.enable_python_sdk,
+        counts_by_kind: count_by_kind(&ctx.catalog),
+        diagnostics: ctx.catalog.diagnostics.clone(),
+    };
 
     if global.json {
         serde_json::to_writer_pretty(std::io::stdout(), &report)?;
@@ -141,10 +298,19 @@ pub fn run_doctor(global: &GlobalArgs) -> Result<ExitCode> {
     } else {
         report.render_human();
     }
+    // Per-harness doctor must surface a missing binary as ExitCode::Config
+    // because the user explicitly asked about that harness.
+    if !report.binary_on_path {
+        return Ok(ExitCode::Config);
+    }
     Ok(ExitCode::Ok)
 }
 
-pub fn run_plan(global: &GlobalArgs, roster_id: &str, what: &HarnessPlanAction) -> Result<ExitCode> {
+pub fn run_plan(
+    global: &GlobalArgs,
+    roster_id: &str,
+    what: &HarnessPlanAction,
+) -> Result<ExitCode> {
     let HarnessPlanAction::Execute { prompt } = what;
     let bundle = build_bundle(global, roster_id)?;
     let planned = plan_with_bundle(&bundle, prompt.clone(), global)?;
@@ -218,7 +384,10 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
     }
 
     // Build the ExecutionPlan via the shared envelope and run it.
-    let execution_plan = planned.to_execution_plan(&bundle.roster)?;
+    let execution_plan = planned.to_execution_plan(
+        &bundle.roster,
+        effective_materialization(&bundle.roster, global),
+    )?;
 
     // Write the run to the runs/ directory.
     let runs_dir = bundle.storage.runs_dir();
@@ -229,7 +398,7 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
         action: ActionRequest::Execute {
             prompt: prompt.to_string(),
         },
-        ..bundle.build_request(&ctx_cwd(global)?, prompt.to_string())
+        ..bundle.build_request(&ctx_cwd(global)?, prompt.to_string(), global)
     };
     run_dir.write_request(&request)?;
     run_dir.write_plan(&execution_plan)?;
@@ -242,28 +411,24 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
         started_at: OffsetDateTime::now_utc(),
     });
 
-    // Always try to finalize the run directory, even when execution failed,
-    // so partial transcripts and records are preserved. Surface any
-    // finalization failure: downstream tooling treats a missing manifest or
-    // un-committed run dir as a lost run.
-    let manifest = match run_dir.write_manifest() {
-        Ok(m) => Some(m),
-        Err(err) => {
-            eprintln!("katachi harness codex execute: writing run manifest: {err}");
-            None
-        }
-    };
-    let final_path = match run_dir.commit() {
-        Ok(p) => Some(p),
-        Err(err) => {
-            eprintln!("katachi harness codex execute: committing run directory: {err}");
-            None
-        }
-    };
-    let persist_failed = manifest.is_none() || final_path.is_none();
-
     match outcome {
         Ok(record) => {
+            let outcome_kind = record.result.outcome;
+            let finalized =
+                finalize_run_directory(run_dir, Some(outcome_kind), CommitPolicy::SuccessOnly);
+            if let Some(err) = &finalized.manifest_error {
+                eprintln!("katachi harness codex execute: writing run manifest: {err:#}");
+            }
+            if let Some(err) = &finalized.commit_error {
+                eprintln!("katachi harness codex execute: committing run directory: {err:#}");
+            }
+            if !finalized.is_committed() {
+                eprintln!(
+                    "katachi harness codex execute: partial preserved at `{}`",
+                    finalized.partial_path
+                );
+            }
+
             if global.json {
                 serde_json::to_writer_pretty(std::io::stdout(), &record)?;
                 println!();
@@ -272,25 +437,34 @@ pub fn run_execute(global: &GlobalArgs, roster_id: &str, prompt: &str) -> Result
                     "run {} finished with outcome={:?}",
                     record.run_id, record.result.outcome
                 );
-                if let Some(path) = &final_path {
-                    println!("recorded at {}", path);
+                println!("recorded at {}", finalized.path);
+                if !finalized.is_committed() {
+                    println!("state: partial");
                 }
-                if manifest.is_some() {
+                if finalized.manifest_written() {
                     println!("manifest written");
                 }
             }
-            if persist_failed {
+            if outcome_kind == katachi_core::record::Outcome::Success && !finalized.is_committed() {
                 return Ok(ExitCode::Execute);
             }
-            Ok(match record.result.outcome {
+            Ok(match outcome_kind {
                 katachi_core::record::Outcome::Success => ExitCode::Ok,
-                katachi_core::record::Outcome::Planned => ExitCode::Ok,
-                katachi_core::record::Outcome::Failure => ExitCode::Execute,
-                katachi_core::record::Outcome::Timeout => ExitCode::Execute,
+                katachi_core::record::Outcome::Planned
+                | katachi_core::record::Outcome::Failure
+                | katachi_core::record::Outcome::Timeout => ExitCode::Execute,
             })
         }
         Err(err) => {
+            let finalized = finalize_run_directory(run_dir, None, CommitPolicy::SuccessOnly);
             eprintln!("katachi harness codex execute: {err}");
+            if let Some(manifest_err) = &finalized.manifest_error {
+                eprintln!("katachi harness codex execute: writing run manifest: {manifest_err:#}");
+            }
+            eprintln!(
+                "katachi harness codex execute: partial preserved at `{}`",
+                finalized.partial_path
+            );
             Ok(ExitCode::Execute)
         }
     }
@@ -477,6 +651,7 @@ impl<'a> ScanSummary<'a> {
 
 struct BuiltBundle {
     roster: CodexRosterFile,
+    backend: BackendKind,
     effective: katachi_harness_codex::effective::EffectiveCodexConfig,
     settings: CodexSettings,
     storage: katachi_core::paths::StoragePaths,
@@ -495,22 +670,25 @@ impl BuiltBundle {
             "  approval_policy: {:?}",
             self.effective.policy.approval_policy
         );
-        println!("  sandbox_mode:    {:?}", self.effective.policy.sandbox_mode);
+        println!(
+            "  sandbox_mode:    {:?}",
+            self.effective.policy.sandbox_mode
+        );
         println!("  model:           {:?}", self.effective.policy.model);
         println!("  profile:         {:?}", self.effective.policy.profile);
-        println!(
-            "  output_mode:     {:?}",
-            self.effective.policy.output_mode
-        );
+        println!("  output_mode:     {:?}", self.effective.policy.output_mode);
         println!(
             "  output_schema:   {:?}",
             self.effective.policy.output_schema_file
         );
         println!("mcp servers:");
-        for (name, _) in &self.effective.mcp_servers {
+        for name in self.effective.mcp_servers.keys() {
             println!("  - {name}");
         }
-        println!("instruction chain ({}):", self.effective.instruction_chain.len());
+        println!(
+            "instruction chain ({}):",
+            self.effective.instruction_chain.len()
+        );
         for doc in &self.effective.instruction_chain {
             println!("  {} {} ({})", doc.order, doc.id, doc.scope);
         }
@@ -527,15 +705,32 @@ impl BuiltBundle {
         }
     }
 
-    fn build_request(&self, cwd: &Utf8PathBuf, _prompt: String) -> InvocationRequest {
+    fn build_request(
+        &self,
+        cwd: &Utf8PathBuf,
+        _prompt: String,
+        global: &GlobalArgs,
+    ) -> InvocationRequest {
         let mut req = InvocationRequest::new(
             self.roster.id.clone(),
             ActionRequest::Describe, // overridden by caller
             cwd.clone(),
         );
-        req.materialization = roster_materialization_mode(&self.roster);
+        req.materialization = effective_materialization(&self.roster, global);
+        req.dry_run = global.dry_run;
         req
     }
+}
+
+fn effective_materialization(roster: &CodexRosterFile, global: &GlobalArgs) -> MaterializationMode {
+    // Per policy: --materialization > roster > default (TempOverlay).
+    if let Some(m) = global.materialization {
+        return match m {
+            crate::cli::MaterializationArg::Ambient => MaterializationMode::Ambient,
+            crate::cli::MaterializationArg::TempOverlay => MaterializationMode::TempOverlay,
+        };
+    }
+    roster_materialization_mode(roster)
 }
 
 fn roster_materialization_mode(roster: &CodexRosterFile) -> MaterializationMode {
@@ -592,6 +787,8 @@ fn build_bundle(global: &GlobalArgs, roster_id: &str) -> Result<BuiltBundle> {
         only_active,
     });
 
+    let backend = resolve_backend(&roster, &ctx.settings, global)?;
+
     // 4. Run legality validators.
     let mut validation = Vec::new();
     validation.extend(katachi_harness_codex::legality::validate(
@@ -603,6 +800,7 @@ fn build_bundle(global: &GlobalArgs, roster_id: &str) -> Result<BuiltBundle> {
 
     Ok(BuiltBundle {
         roster,
+        backend,
         effective,
         settings: ctx.settings,
         storage: ctx.storage,
@@ -741,9 +939,7 @@ fn collect_agents(
         all
     } else {
         let want: std::collections::HashSet<&String> = roster.selection.agents.iter().collect();
-        all.into_iter()
-            .filter(|a| want.contains(&a.id))
-            .collect()
+        all.into_iter().filter(|a| want.contains(&a.id)).collect()
     }
 }
 
@@ -760,7 +956,10 @@ impl PlannedWithProjection {
         println!("command:       {}", self.planned.command.join(" "));
         println!("cwd:           {}", self.planned.cwd);
         println!("transcript:    {:?}", self.planned.transcript_mode);
-        println!("materialization files: {}", self.planned.materialization.files.len());
+        println!(
+            "materialization files: {}",
+            self.planned.materialization.files.len()
+        );
         for (k, v) in &self.planned.env {
             println!("  env {k} = {v}");
         }
@@ -776,6 +975,7 @@ impl PlannedWithProjection {
     fn to_execution_plan(
         &self,
         roster: &CodexRosterFile,
+        materialization: MaterializationMode,
     ) -> Result<katachi_core::plan::ExecutionPlan> {
         use katachi_core::plan::{
             ExecutionBackendPlan, ExecutionPlan, MaterializationPlan, PLAN_SCHEMA_VERSION,
@@ -787,7 +987,7 @@ impl PlannedWithProjection {
             harness: katachi_core::model::HarnessKind::Codex,
             backend: self.planned.backend,
             materialization: MaterializationPlan {
-                mode: roster_materialization_mode(roster),
+                mode: materialization,
                 overlay_root: None,
                 files: self.planned.materialization.files.clone(),
                 env: self.planned.materialization.env.clone(),
@@ -812,12 +1012,12 @@ fn plan_with_bundle(
 ) -> Result<PlannedWithProjection> {
     // Build a request-sized InvocationRequest to hand to the planner.
     let cwd = ctx_cwd(global)?;
-    let mut req = bundle.build_request(&cwd, prompt.clone());
+    let mut req = bundle.build_request(&cwd, prompt.clone(), global);
     req.action = ActionRequest::Execute { prompt };
     let resolved = katachi_core::plan::ResolvedKatachi {
         katachi_id: bundle.roster.id.clone(),
         harness: katachi_core::model::HarnessKind::Codex,
-        backend: parse_backend(&bundle),
+        backend: bundle.backend,
         selected_items: bundle
             .resolved_items
             .iter()
@@ -838,6 +1038,7 @@ fn plan_with_bundle(
     };
     let inputs = CodexPlanInputs {
         ctx: &ctx,
+        backend: bundle.backend,
         roster: &bundle.roster,
         effective: &bundle.effective,
         settings: &bundle.settings,
@@ -852,6 +1053,7 @@ fn plan_with_bundle(
     );
     let bundle_snapshot = serde_json::json!({
         "roster_id": bundle.roster.id,
+        "backend": bundle.backend,
         "selected": bundle.resolved_items.iter().map(ToString::to_string).collect::<Vec<_>>(),
     });
     Ok(PlannedWithProjection {
@@ -862,14 +1064,32 @@ fn plan_with_bundle(
     })
 }
 
-fn parse_backend(bundle: &BuiltBundle) -> BackendKind {
-    let raw = bundle
-        .roster
-        .run_profile
-        .backend
-        .as_deref()
-        .unwrap_or(bundle.settings.default_backend.as_str());
-    raw.parse().unwrap_or(BackendKind::Cli)
+fn resolve_backend(
+    roster: &CodexRosterFile,
+    settings: &CodexSettings,
+    global: &GlobalArgs,
+) -> Result<BackendKind> {
+    // Per policy: roster pin > first valid --prefer-backend > config default > Cli.
+    let config_backend = settings
+        .default_backend
+        .parse::<BackendKind>()
+        .map_err(|_| {
+            anyhow!(
+                "unknown codex config default backend `{}`",
+                settings.default_backend
+            )
+        })?;
+    if let Some(raw) = roster.run_profile.backend.as_deref() {
+        return raw
+            .parse::<BackendKind>()
+            .map_err(|_| anyhow!("unknown codex roster backend `{raw}`"));
+    }
+    for raw in &global.prefer_backend {
+        if let Ok(parsed) = raw.parse::<BackendKind>() {
+            return Ok(parsed);
+        }
+    }
+    Ok(config_backend)
 }
 
 #[derive(Serialize, Default)]
@@ -909,10 +1129,7 @@ impl DoctorReport {
         }
         println!();
         println!("Flags:");
-        println!(
-            "  respect_project_trust: {}",
-            self.respect_project_trust
-        );
+        println!("  respect_project_trust: {}", self.respect_project_trust);
         println!("  enable_python_sdk:     {}", self.enable_python_sdk);
         println!();
         println!("Discovered:");

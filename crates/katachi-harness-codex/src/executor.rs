@@ -20,7 +20,7 @@ use crate::materialize::{HOME_SUBDIR, PROJECT_SUBDIR};
 /// Run the plan, materializing the overlay when required.
 pub fn run(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> {
     if matches!(ctx.plan.materialization.mode, MaterializationMode::Ambient) {
-        return execute::run(ctx);
+        return execute_with_codex_transcript(ctx);
     }
 
     // Temp-overlay path: write the files, rewrite env + cwd to absolute,
@@ -33,7 +33,7 @@ pub fn run(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> 
         run_dir: ctx.run_dir,
         started_at: ctx.started_at,
     };
-    let record = execute::run(&new_ctx);
+    let record = execute_with_codex_transcript(&new_ctx);
 
     // Preserve the overlay on failure by toggling the keep policy.
     match &record {
@@ -53,12 +53,19 @@ pub fn run(ctx: &ExecuteContext<'_>) -> Result<ExecutionRecord, ExecutionError> 
     record
 }
 
+fn execute_with_codex_transcript(
+    ctx: &ExecuteContext<'_>,
+) -> Result<ExecutionRecord, ExecutionError> {
+    let normalizer: Box<dyn Fn(&str) -> katachi_core::transcript::EventKind + Send + Sync> =
+        Box::new(crate::transcript::parse_line);
+    execute::run_with_normalizer(ctx, Some(normalizer.as_ref()))
+}
+
 fn materialize_overlay(
     ctx: &ExecuteContext<'_>,
 ) -> Result<(TempOverlay, ExecutionPlan), ExecutionError> {
-    let mut overlay = TempOverlay::with_prefix("katachi-codex-").map_err(|source| {
-        ExecutionError::Io { source }
-    })?;
+    let mut overlay = TempOverlay::with_prefix("katachi-codex-")
+        .map_err(|source| ExecutionError::Io { source })?;
 
     for file in &ctx.plan.materialization.files {
         write_file(&mut overlay, file)?;
@@ -265,9 +272,7 @@ mod tests {
 
         let request = InvocationRequest::new(
             "k",
-            ActionRequest::Execute {
-                prompt: "p".into(),
-            },
+            ActionRequest::Execute { prompt: "p".into() },
             Utf8PathBuf::from("/tmp"),
         );
         let rec = run(&ExecuteContext {

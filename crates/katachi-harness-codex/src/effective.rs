@@ -220,22 +220,30 @@ fn resolve_policy(
     merged: &serde_json::Map<String, serde_json::Value>,
     run_profile: &RosterRunProfile,
 ) -> EffectivePolicy {
-    let approval_policy = run_profile
-        .approval_policy
-        .clone()
-        .or_else(|| merged.get("approval_policy").and_then(|v| v.as_str()).map(str::to_string));
-    let sandbox_mode = run_profile
-        .sandbox_mode
-        .clone()
-        .or_else(|| merged.get("sandbox_mode").and_then(|v| v.as_str()).map(str::to_string));
-    let model = run_profile
-        .model
-        .clone()
-        .or_else(|| merged.get("model").and_then(|v| v.as_str()).map(str::to_string));
-    let profile = run_profile
-        .profile
-        .clone()
-        .or_else(|| merged.get("profile").and_then(|v| v.as_str()).map(str::to_string));
+    let approval_policy = run_profile.approval_policy.clone().or_else(|| {
+        merged
+            .get("approval_policy")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
+    let sandbox_mode = run_profile.sandbox_mode.clone().or_else(|| {
+        merged
+            .get("sandbox_mode")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
+    let model = run_profile.model.clone().or_else(|| {
+        merged
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
+    let profile = run_profile.profile.clone().or_else(|| {
+        merged
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
     let output_mode = run_profile.output_mode.clone();
     let output_schema_file = run_profile.output_schema_file.clone();
     let writable_dirs = run_profile.writable_dirs.clone();
@@ -401,7 +409,12 @@ mod tests {
     #[test]
     fn higher_precedence_overrides_lower() {
         let layers = [
-            layer("user", "approval_policy = \"on-request\"\nmodel = \"gpt-5.4\"", 100, true),
+            layer(
+                "user",
+                "approval_policy = \"on-request\"\nmodel = \"gpt-5.4\"",
+                100,
+                true,
+            ),
             layer("project", "approval_policy = \"never\"", 200, true),
         ];
         let inputs = BuildEffective {
@@ -447,8 +460,10 @@ mod tests {
     #[test]
     fn run_profile_overrides_merged_policy() {
         let layers = [layer("user", "approval_policy = \"on-request\"", 100, true)];
-        let mut rp = RosterRunProfile::default();
-        rp.approval_policy = Some("never".into());
+        let rp = RosterRunProfile {
+            approval_policy: Some("never".into()),
+            ..RosterRunProfile::default()
+        };
         let inputs = BuildEffective {
             layers: &layers,
             instructions: &[],

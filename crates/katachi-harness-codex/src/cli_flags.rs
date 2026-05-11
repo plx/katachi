@@ -88,7 +88,10 @@ mod tests {
 
     #[test]
     fn output_mode_maps_to_known_values() {
-        assert_eq!(output_mode("machine-readable"), OutputMode::ExperimentalJson);
+        assert_eq!(
+            output_mode("machine-readable"),
+            OutputMode::ExperimentalJson
+        );
         assert_eq!(output_mode("text"), OutputMode::Text);
     }
 }

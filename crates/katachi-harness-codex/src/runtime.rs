@@ -77,8 +77,7 @@ impl CodexSettings {
 
         if let Some(v) = hc.extra.get("codex_home") {
             if let Some(s) = v.as_str() {
-                settings.codex_home =
-                    expand_tilde(Utf8Path::new(s)).unwrap_or_else(|_| s.into());
+                settings.codex_home = expand_tilde(Utf8Path::new(s)).unwrap_or_else(|_| s.into());
             }
         }
         if let Some(v) = hc.extra.get("project_roots") {

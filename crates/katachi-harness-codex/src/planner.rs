@@ -20,13 +20,15 @@ use std::collections::BTreeMap;
 use camino::Utf8PathBuf;
 use katachi_core::error::PlanError;
 use katachi_core::harness::PlanContext;
-use katachi_core::model::{BackendKind, HarnessKind, MaterializationMode};
+use katachi_core::model::{BackendKind, HarnessKind};
 use katachi_core::plan::{
     ActionRequest, ExecutionBackendPlan, ExecutionPlan, MaterializationPlan, TranscriptMode,
     PLAN_SCHEMA_VERSION,
 };
 
-use crate::cli_flags::{approval_policy as approval_flag, flags, sandbox_mode as sandbox_flag, OutputMode};
+use crate::cli_flags::{
+    approval_policy as approval_flag, flags, sandbox_mode as sandbox_flag, OutputMode,
+};
 use crate::effective::EffectiveCodexConfig;
 use crate::materialize::{plan_materialization, CodexMaterializationPlan, HOME_SUBDIR};
 use crate::roster_file::CodexRosterFile;
@@ -43,6 +45,7 @@ use crate::CodexSettings;
 /// - Codex runtime settings (binary path, trust flag, etc.)
 pub struct CodexPlanInputs<'a> {
     pub ctx: &'a PlanContext<'a>,
+    pub backend: BackendKind,
     pub roster: &'a CodexRosterFile,
     pub effective: &'a EffectiveCodexConfig,
     pub settings: &'a CodexSettings,
@@ -67,7 +70,7 @@ pub struct PlannedCodexRun {
 /// The overlay root is not known at planning time; callers fill it in
 /// once they've materialized the overlay and rewrite the env accordingly.
 pub fn plan(inputs: &CodexPlanInputs<'_>) -> Result<PlannedCodexRun, PlanError> {
-    let backend = parse_backend(inputs.roster.run_profile.backend.as_deref(), &inputs.settings.default_backend)?;
+    let backend = inputs.backend;
     if backend == BackendKind::SdkPy && !inputs.settings.enable_python_sdk {
         return Err(PlanError::ProjectionLoss {
             backend: backend.to_string(),
@@ -123,6 +126,7 @@ pub fn build_plan(ctx: &PlanContext<'_>) -> Result<ExecutionPlan, PlanError> {
 
     let inputs = CodexPlanInputs {
         ctx,
+        backend: ctx.resolved.backend,
         roster: &bundle.roster,
         effective: &bundle.effective,
         settings: &bundle.settings,
@@ -130,12 +134,8 @@ pub fn build_plan(ctx: &PlanContext<'_>) -> Result<ExecutionPlan, PlanError> {
 
     let planned = plan(&inputs)?;
 
-    let mode = match ctx.request.materialization {
-        MaterializationMode::Ambient => MaterializationMode::Ambient,
-        MaterializationMode::TempOverlay => MaterializationMode::TempOverlay,
-    };
     let materialization = MaterializationPlan {
-        mode,
+        mode: ctx.request.materialization,
         overlay_root: planned.overlay_root.clone(),
         files: planned.materialization.files.clone(),
         env: planned.materialization.env.clone(),
@@ -190,16 +190,6 @@ fn transcript_mode_for(effective: &EffectiveCodexConfig) -> TranscriptMode {
         Some(OutputMode::ExperimentalJson) => TranscriptMode::JsonStream,
         _ => TranscriptMode::RawOnly,
     }
-}
-
-fn parse_backend(
-    roster_backend: Option<&str>,
-    default: &str,
-) -> Result<BackendKind, PlanError> {
-    let raw = roster_backend.unwrap_or(default);
-    raw.parse::<BackendKind>().map_err(|_| PlanError::BuildFailed {
-        message: format!("unknown backend `{raw}` for codex"),
-    })
 }
 
 fn build_cli_argv(inputs: &CodexPlanInputs<'_>) -> Result<Vec<String>, PlanError> {
@@ -412,6 +402,7 @@ mod tests {
         };
         let inputs = CodexPlanInputs {
             ctx: &ctx,
+            backend: BackendKind::Cli,
             roster: &roster,
             effective: &effective,
             settings: &settings,
@@ -456,6 +447,7 @@ mod tests {
         };
         let inputs = CodexPlanInputs {
             ctx: &ctx,
+            backend: BackendKind::SdkPy,
             roster: &roster,
             effective: &effective,
             settings: &settings,
@@ -490,6 +482,7 @@ mod tests {
         };
         let inputs = CodexPlanInputs {
             ctx: &ctx,
+            backend: BackendKind::SdkTs,
             roster: &roster,
             effective: &effective,
             settings: &settings,
@@ -545,4 +538,3 @@ mod tests {
         assert!(plan.execution.argv.contains(&"exec".to_string()));
     }
 }
-

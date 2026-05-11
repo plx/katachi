@@ -108,10 +108,7 @@ project_roots = ["."]
             .env("KATACHI_CONFIG", &self.config_path)
             .env("KATACHI_DATA", &self.data_root)
             .env("KATACHI_CACHE", self.data_root.join("cache"))
-            .args([
-                "--cwd",
-                self.root.to_str().unwrap(),
-            ])
+            .args(["--cwd", self.root.to_str().unwrap()])
             .args(args);
         cmd.output().unwrap()
     }
@@ -144,6 +141,61 @@ fn scan_finds_loose_skill_and_agent() {
 }
 
 #[test]
+fn scan_finds_loose_output_styles_and_duplicates() {
+    let fx = Fixture::new();
+    write(&fx.root, ".claude/output-styles/brief.md", "project style");
+    write(
+        &fx.root,
+        "no-user-root/output-styles/brief.md",
+        "user style",
+    );
+
+    let out = fx.run(&["--json", "harness", "claude", "scan"]);
+    assert_success(&out, "scan");
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    let items = v["items"].as_array().unwrap();
+    assert!(items.iter().any(
+        |item| item["item_ref"]["kind"] == "output_style" && item["item_ref"]["id"] == "brief"
+    ));
+    assert!(v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "claude.duplicate-output-style"));
+}
+
+#[test]
+fn roster_can_select_loose_output_style() {
+    let fx = Fixture::new();
+    write(&fx.root, ".claude/output-styles/brief.md", "project style");
+    write(
+        &fx.root,
+        "data/rosters/claude/style.toml",
+        r#"
+version = 1
+id = "style"
+
+[selection]
+output_styles = ["brief"]
+
+[run_profile]
+backend = "cli"
+"#,
+    );
+
+    let out = fx.run(&["--json", "harness", "claude", "dump-roster", "style"]);
+    assert_success(&out, "dump-roster");
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert!(v["resolved"]["selected_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["item"]["kind"] == "output_style" && i["item"]["id"] == "brief"));
+}
+
+#[test]
 fn doctor_reports_binary_resolution() {
     let fx = Fixture::new();
     let out = fx.run(&["harness", "claude", "doctor"]);
@@ -155,9 +207,7 @@ fn doctor_reports_binary_resolution() {
 #[test]
 fn plan_renders_full_argv() {
     let fx = Fixture::new();
-    let out = fx.run(&[
-        "harness", "claude", "plan", "greet", "execute", "hello",
-    ]);
+    let out = fx.run(&["harness", "claude", "plan", "greet", "execute", "hello"]);
     assert_success(&out, "plan");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("--print"));
@@ -190,9 +240,7 @@ fn dump_roster_emits_json() {
 #[test]
 fn project_ts_emits_sdk_runner() {
     let fx = Fixture::new();
-    let out = fx.run(&[
-        "harness", "claude", "project", "greet", "--sdk", "ts",
-    ]);
+    let out = fx.run(&["harness", "claude", "project", "greet", "--sdk", "ts"]);
     assert_success(&out, "project");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("@anthropic-ai/claude-agent-sdk"));
@@ -202,8 +250,6 @@ fn project_ts_emits_sdk_runner() {
 #[test]
 fn unknown_roster_id_exits_resolve() {
     let fx = Fixture::new();
-    let out = fx.run(&[
-        "harness", "claude", "plan", "ghost", "execute", "prompt",
-    ]);
+    let out = fx.run(&["harness", "claude", "plan", "ghost", "execute", "prompt"]);
     assert_eq!(out.status.code(), Some(4), "expected Resolve exit code");
 }

@@ -162,7 +162,11 @@ pub fn to_discovered_item(cs: &ContextSource) -> DiscoveredItem {
     let preview = read_preview(&cs.path);
     let id = cs.scope.item_id(&cs.file_name);
     DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Gemini, GeminiItemKind::ContextSource.as_str(), id),
+        item_ref: ItemRef::new(
+            HarnessKind::Gemini,
+            GeminiItemKind::ContextSource.as_str(),
+            id,
+        ),
         display_name: format!("{} ({})", cs.file_name, cs.scope.as_str()),
         source: ItemSource {
             path: Some(cs.path.clone()),
@@ -250,14 +254,8 @@ mod tests {
 
         let out = ContextDiscovery::discover(&[user_root], &[project_root], "GEMINI.md");
         assert_eq!(out.sources.len(), 2);
-        assert!(out
-            .sources
-            .iter()
-            .any(|c| c.scope == ContextScope::User));
-        assert!(out
-            .sources
-            .iter()
-            .any(|c| c.scope == ContextScope::Project));
+        assert!(out.sources.iter().any(|c| c.scope == ContextScope::User));
+        assert!(out.sources.iter().any(|c| c.scope == ContextScope::Project));
     }
 
     #[test]

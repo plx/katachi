@@ -25,7 +25,13 @@ pub fn scan_hooks(
 ) -> Result<(), ClaudeDiscoveryError> {
     for dir in roots.existing_claude_dirs() {
         scan_settings(state, dir, dir.scope, &dir.settings_json(), false)?;
-        scan_settings(state, dir, ClaudeScope::Local, &dir.local_settings_json(), true)?;
+        scan_settings(
+            state,
+            dir,
+            ClaudeScope::Local,
+            &dir.local_settings_json(),
+            true,
+        )?;
     }
     Ok(())
 }
@@ -40,12 +46,11 @@ fn scan_settings(
     if !path.exists() {
         return Ok(());
     }
-    let raw = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let raw =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
+        })?;
     let value: Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
         Err(source) => {

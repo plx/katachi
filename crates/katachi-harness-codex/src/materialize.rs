@@ -96,9 +96,7 @@ pub fn plan_materialization(effective: &EffectiveCodexConfig) -> CodexMaterializ
         });
         files.push(MaterializedFile {
             dest: project.join("AGENTS.md"),
-            source: FileSource::Inline {
-                contents: combined,
-            },
+            source: FileSource::Inline { contents: combined },
         });
     }
 
@@ -226,8 +224,8 @@ fn json_to_toml(value: &serde_json::Value) -> Result<String, String> {
         serde_json::Value::Object(m) => m,
         _ => serde_json::Map::new(),
     };
-    let toml_value: toml::Value = serde_json::from_value(serde_json::Value::Object(obj))
-        .map_err(|e| e.to_string())?;
+    let toml_value: toml::Value =
+        serde_json::from_value(serde_json::Value::Object(obj)).map_err(|e| e.to_string())?;
     toml::to_string_pretty(&toml_value).map_err(|e| e.to_string())
 }
 
@@ -290,7 +288,9 @@ pub fn realize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effective::{EffectiveHookSet, EffectiveInstruction, EffectivePolicy, EffectiveRuleSet};
+    use crate::effective::{
+        EffectiveHookSet, EffectiveInstruction, EffectivePolicy, EffectiveRuleSet,
+    };
     use crate::roster_file::RunProfile as RosterRunProfile;
     use std::collections::BTreeMap;
 
@@ -401,7 +401,11 @@ mod tests {
             body: "deny = []".into(),
         }];
         let plan = plan_materialization(&eff);
-        let paths: Vec<_> = plan.files.iter().map(|f| f.dest.as_str().to_string()).collect();
+        let paths: Vec<_> = plan
+            .files
+            .iter()
+            .map(|f| f.dest.as_str().to_string())
+            .collect();
         // Both `/` and `:` get slugified to `_`, so
         // `project:/p:readonly.toml` -> `project__p_readonly.toml`.
         assert!(

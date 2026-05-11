@@ -37,16 +37,12 @@ pub fn scan_plugins(
     Ok(())
 }
 
-fn scan_plugin_root(
-    state: &mut ScanState,
-    root: &ScopedPath,
-) -> Result<(), ClaudeDiscoveryError> {
-    let read = std::fs::read_dir(root.path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+fn scan_plugin_root(state: &mut ScanState, root: &ScopedPath) -> Result<(), ClaudeDiscoveryError> {
+    let read =
+        std::fs::read_dir(root.path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: root.path.clone(),
             source,
-        }
-    })?;
+        })?;
     let mut plugin_dirs: Vec<Utf8PathBuf> = Vec::new();
     for entry in read {
         let entry = entry.map_err(|source| ClaudeDiscoveryError::Io {
@@ -98,11 +94,7 @@ fn scan_plugin_dir(
     // are always skipped. A manifest file that *exists* but failed to
     // parse still counts as a "this is a plugin dir" signal — the
     // user will see the parse diagnostic and can fix it.
-    if dir
-        .file_name()
-        .map(|n| n.starts_with('.'))
-        .unwrap_or(false)
-    {
+    if dir.file_name().map(|n| n.starts_with('.')).unwrap_or(false) {
         return Ok(());
     }
     let has_conventional_subdir = [
@@ -203,19 +195,21 @@ struct PluginManifest {
 }
 
 fn parse_manifest(path: &Utf8Path) -> Result<PluginManifest, ClaudeDiscoveryError> {
-    let raw_text = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let raw_text =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
-    let raw: serde_json::Value = serde_json::from_str(&raw_text).map_err(|source| {
-        ClaudeDiscoveryError::Json {
+        })?;
+    let raw: serde_json::Value =
+        serde_json::from_str(&raw_text).map_err(|source| ClaudeDiscoveryError::Json {
             path: path.to_owned(),
             source,
-        }
-    })?;
-    let id = raw.get("id").or_else(|| raw.get("name")).and_then(|v| v.as_str()).map(str::to_string);
+        })?;
+    let id = raw
+        .get("id")
+        .or_else(|| raw.get("name"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let display_name = raw
         .get("display_name")
         .or_else(|| raw.get("displayName"))
@@ -403,11 +397,12 @@ fn scan_packaged_mcps(
         if stem.is_empty() {
             continue;
         }
-        let raw_text =
-            std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
+        let raw_text = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
+            ClaudeDiscoveryError::Io {
                 path: path.clone(),
                 source,
-            })?;
+            }
+        })?;
         let raw: serde_json::Value = match serde_json::from_str(&raw_text) {
             Ok(v) => v,
             Err(source) => {
@@ -560,12 +555,11 @@ fn parse_packaged_skill(
     scope: ClaudeScope,
     plugin_ref: &ItemRef,
 ) -> Result<(DiscoveredItem, Vec<ParsedPending>), ClaudeDiscoveryError> {
-    let source = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let source =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
+        })?;
     let doc = frontmatter::parse(path, &source)?;
     let dir_name = path
         .parent()
@@ -608,7 +602,11 @@ fn parse_packaged_skill(
     });
 
     let item = DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Claude, ClaudeItemKind::Skill.as_str(), name.clone()),
+        item_ref: ItemRef::new(
+            HarnessKind::Claude,
+            ClaudeItemKind::Skill.as_str(),
+            name.clone(),
+        ),
         display_name: if description.is_empty() {
             name.clone()
         } else {
@@ -657,12 +655,11 @@ fn parse_packaged_agent(
     scope: ClaudeScope,
     plugin_ref: &ItemRef,
 ) -> Result<(DiscoveredItem, Vec<ParsedPending>), ClaudeDiscoveryError> {
-    let source = std::fs::read_to_string(path.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let source =
+        std::fs::read_to_string(path.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
+        })?;
     let doc = frontmatter::parse(path, &source)?;
     let stem = path.file_stem().unwrap_or("").to_string();
     let name = doc
@@ -710,7 +707,11 @@ fn parse_packaged_agent(
     }
 
     let item = DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Claude, ClaudeItemKind::Agent.as_str(), name.clone()),
+        item_ref: ItemRef::new(
+            HarnessKind::Claude,
+            ClaudeItemKind::Agent.as_str(),
+            name.clone(),
+        ),
         display_name: if description.is_empty() {
             name.clone()
         } else {
@@ -852,10 +853,7 @@ mod tests {
             .find(|(ir, _)| ir.kind == "skill")
             .unwrap()
             .1;
-        assert_eq!(
-            skill.packaging.as_ref().unwrap().item_ref.id,
-            "p1"
-        );
+        assert_eq!(skill.packaging.as_ref().unwrap().item_ref.id, "p1");
         assert!(skill.packaging.as_ref().unwrap().required);
     }
 
@@ -875,16 +873,8 @@ mod tests {
         )
         .unwrap();
         fs::write(plugin.join("hooks/pre-commit.sh"), "#!/bin/sh").unwrap();
-        fs::write(
-            plugin.join("mcps/chrome.json"),
-            r#"{"name": "chrome-dev"}"#,
-        )
-        .unwrap();
-        fs::write(
-            plugin.join("output-styles/minimal.md"),
-            "minimal style",
-        )
-        .unwrap();
+        fs::write(plugin.join("mcps/chrome.json"), r#"{"name": "chrome-dev"}"#).unwrap();
+        fs::write(plugin.join("output-styles/minimal.md"), "minimal style").unwrap();
 
         let catalog = scan_with_plugin_root(root, ClaudeScope::PluginUser);
         let kinds: std::collections::BTreeSet<_> = catalog

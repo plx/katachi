@@ -248,9 +248,8 @@ mod tests {
             }
             _ => panic!("expected ToolUse"),
         }
-        let res_ev = parse_line(
-            r#"{"type":"tool_result","name":"Bash","output":"hello","is_error":false}"#,
-        );
+        let res_ev =
+            parse_line(r#"{"type":"tool_result","name":"Bash","output":"hello","is_error":false}"#);
         match res_ev {
             EventKind::ToolResult {
                 name,
@@ -310,10 +309,7 @@ mod tests {
         ];
         let fr = final_result(&events);
         assert_eq!(fr.assistant_text.as_deref(), Some("final answer"));
-        assert_eq!(
-            fr.result.as_ref().map(|(_, o)| o.as_str()),
-            Some("success")
-        );
+        assert_eq!(fr.result.as_ref().map(|(_, o)| o.as_str()), Some("success"));
     }
 
     #[test]

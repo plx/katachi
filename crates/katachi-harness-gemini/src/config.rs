@@ -242,8 +242,10 @@ treat_preview_features_as_opt_in = false
 
     #[test]
     fn relative_project_roots_get_joined_to_cwd() {
-        let mut g = GeminiConfig::default();
-        g.project_roots = vec![Utf8PathBuf::from("subdir")];
+        let g = GeminiConfig {
+            project_roots: vec![Utf8PathBuf::from("subdir")],
+            ..GeminiConfig::default()
+        };
         let roots = g.resolved_project_roots(Utf8Path::new("/workspace"));
         assert_eq!(roots, vec![Utf8PathBuf::from("/workspace/subdir")]);
     }

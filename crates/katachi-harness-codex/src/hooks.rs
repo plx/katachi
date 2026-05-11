@@ -30,7 +30,11 @@ pub struct HookSet {
 
 impl HookSet {
     pub fn item_ref(&self) -> ItemRef {
-        ItemRef::new(HarnessKind::Codex, CodexItemKind::HookSet.as_str(), &self.id)
+        ItemRef::new(
+            HarnessKind::Codex,
+            CodexItemKind::HookSet.as_str(),
+            &self.id,
+        )
     }
 
     pub fn to_item(&self) -> DiscoveredItem {
@@ -56,10 +60,7 @@ impl HookSet {
 }
 
 /// Find every `hooks.json` adjacent to a discovered config layer.
-pub fn discover_hooks(
-    layers: &[ConfigLayer],
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<HookSet> {
+pub fn discover_hooks(layers: &[ConfigLayer], diagnostics: &mut Vec<Diagnostic>) -> Vec<HookSet> {
     let mut out: Vec<HookSet> = Vec::new();
     for layer in layers {
         let Some(parent_dir) = layer.path.parent() else {

@@ -68,6 +68,7 @@ pub fn scan_dir(dir: &Utf8Path, extension_name: &str) -> Option<Vec<HookSet>> {
 /// Gemini has used a few shapes for hooks:
 ///  - `"hooks": [...]`
 ///  - `"hooks": { "PreToolUse": [...], ... }`
+///
 /// We treat any of these as a single hook set per settings layer.
 pub fn scan_settings(body: &Value, settings_scope: &str, path: &Utf8Path) -> Option<HookSet> {
     let raw = body.get("hooks")?.clone();
@@ -112,7 +113,11 @@ pub fn to_discovered_item(h: &HookSet) -> DiscoveredItem {
         HookOwner::Settings { .. } => None,
     };
     DiscoveredItem {
-        item_ref: ItemRef::new(HarnessKind::Gemini, GeminiItemKind::HookSet.as_str(), h.id.clone()),
+        item_ref: ItemRef::new(
+            HarnessKind::Gemini,
+            GeminiItemKind::HookSet.as_str(),
+            h.id.clone(),
+        ),
         display_name: h.id.clone(),
         source: ItemSource {
             path: Some(h.path.clone()),

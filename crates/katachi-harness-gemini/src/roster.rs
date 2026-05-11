@@ -112,9 +112,7 @@ fn push_context_selectors(out: &mut Vec<Selector>, entries: &[String]) {
         let id = match entry.split(':').count() {
             2 => {
                 // scope:file -> context:<scope>:<file>
-                let mut it = entry.splitn(2, ':');
-                let scope = it.next().unwrap();
-                let file = it.next().unwrap();
+                let (scope, file) = entry.split_once(':').unwrap();
                 format!("context:{scope}:{file}")
             }
             _ => {
@@ -288,6 +286,8 @@ impl GeminiRosterStore {
             return Ok(Self::default());
         }
         let mut out = Self::default();
+        let mut seen: std::collections::BTreeMap<String, Utf8PathBuf> =
+            std::collections::BTreeMap::new();
         let iter = fs::read_dir(dir.as_std_path()).map_err(|source| RosterError::Io {
             path: dir.to_owned(),
             source,
@@ -304,6 +304,14 @@ impl GeminiRosterStore {
                 continue;
             }
             let roster = GeminiRoster::from_toml_file(&utf8)?;
+            if let Some(prev) = seen.get(&roster.id) {
+                return Err(RosterError::DuplicateId {
+                    id: roster.id.clone(),
+                    first: prev.clone(),
+                    second: utf8,
+                });
+            }
+            seen.insert(roster.id.clone(), utf8.clone());
             out.rosters.push(roster);
         }
         out.rosters.sort_by(|a, b| a.id.cmp(&b.id));
@@ -333,6 +341,12 @@ pub enum RosterError {
     },
     #[error("failed to parse Gemini roster TOML: {0}")]
     Parse(#[source] toml::de::Error),
+    #[error("duplicate gemini roster id `{id}` in `{first}` and `{second}`")]
+    DuplicateId {
+        id: String,
+        first: Utf8PathBuf,
+        second: Utf8PathBuf,
+    },
 }
 
 #[cfg(test)]
@@ -373,10 +387,7 @@ require_preview_features = true
         let r = GeminiRoster::from_toml_str(ACCESSIBILITY_ROSTER).unwrap();
         assert_eq!(r.id, "accessibility-auditor");
         assert_eq!(r.selection.extensions, vec!["workspace-a11y"]);
-        assert_eq!(
-            r.run_profile.model.as_deref(),
-            Some("gemini-3-pro-preview")
-        );
+        assert_eq!(r.run_profile.model.as_deref(), Some("gemini-3-pro-preview"));
         assert!(r.resolution.require_preview_features);
     }
 
@@ -384,7 +395,10 @@ require_preview_features = true
     fn selection_to_selector_set_includes_extension_kind() {
         let r = GeminiRoster::from_toml_str(ACCESSIBILITY_ROSTER).unwrap();
         let sel = r.selection.to_selector_set(true);
-        let found = sel.selectors.iter().any(|s| matches!(s, Selector::ExplicitIds { kind, .. } if kind == "extension"));
+        let found = sel
+            .selectors
+            .iter()
+            .any(|s| matches!(s, Selector::ExplicitIds { kind, .. } if kind == "extension"));
         assert!(found);
         assert!(sel.include_packaging_closure);
     }
@@ -420,9 +434,7 @@ require_preview_features = true
                 _ => None,
             })
             .collect();
-        assert!(refs
-            .iter()
-            .any(|r| r.id == "context:project:GEMINI.md"));
+        assert!(refs.iter().any(|r| r.id == "context:project:GEMINI.md"));
         assert!(refs
             .iter()
             .any(|r| r.id == "context:extension:workspace-a11y:GEMINI.md"));

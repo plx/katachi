@@ -85,12 +85,11 @@ impl ParsedDoc {
 /// Parse the file contents `source`, attributing any errors to `path`.
 pub fn parse(path: &Utf8Path, source: &str) -> Result<ParsedDoc, ClaudeDiscoveryError> {
     let (fm_text, body) = split_frontmatter(source);
-    let frontmatter = parse_frontmatter(fm_text).map_err(|message| {
-        ClaudeDiscoveryError::Frontmatter {
+    let frontmatter =
+        parse_frontmatter(fm_text).map_err(|message| ClaudeDiscoveryError::Frontmatter {
             path: path.to_owned(),
             message,
-        }
-    })?;
+        })?;
     Ok(ParsedDoc {
         frontmatter,
         body: body.to_string(),
@@ -171,11 +170,11 @@ fn parse_frontmatter(text: &str) -> Result<BTreeMap<String, FmValue>, String> {
 }
 
 fn strip_optional_quotes(mut s: String) -> String {
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        if s.len() >= 2 {
-            s.pop();
-            s.remove(0);
-        }
+    if ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+        && s.len() >= 2
+    {
+        s.pop();
+        s.remove(0);
     }
     s
 }

@@ -42,10 +42,7 @@ pub fn scan_instructions(
     Ok(())
 }
 
-fn scan_claude_md(
-    state: &mut ScanState,
-    dir: &ClaudeDir,
-) -> Result<(), ClaudeDiscoveryError> {
+fn scan_claude_md(state: &mut ScanState, dir: &ClaudeDir) -> Result<(), ClaudeDiscoveryError> {
     let md = dir.claude_md();
     if md.exists() {
         emit_instruction(state, &md, dir.scope, InstructionKind::ClaudeMd)?;
@@ -53,20 +50,16 @@ fn scan_claude_md(
     Ok(())
 }
 
-fn scan_rules(
-    state: &mut ScanState,
-    dir: &ClaudeDir,
-) -> Result<(), ClaudeDiscoveryError> {
+fn scan_rules(state: &mut ScanState, dir: &ClaudeDir) -> Result<(), ClaudeDiscoveryError> {
     let rules_dir = dir.rules_dir();
     if !rules_dir.exists() {
         return Ok(());
     }
-    let read = std::fs::read_dir(rules_dir.as_std_path()).map_err(|source| {
-        ClaudeDiscoveryError::Io {
+    let read =
+        std::fs::read_dir(rules_dir.as_std_path()).map_err(|source| ClaudeDiscoveryError::Io {
             path: rules_dir.clone(),
             source,
-        }
-    })?;
+        })?;
     let mut files: Vec<camino::Utf8PathBuf> = Vec::new();
     for entry in read {
         let entry = entry.map_err(|source| ClaudeDiscoveryError::Io {
@@ -165,7 +158,7 @@ fn preview(contents: &str) -> String {
     let mut out = String::new();
     for (i, line) in contents.lines().enumerate() {
         if i >= 3 {
-            out.push_str("…");
+            out.push('…');
             break;
         }
         if !out.is_empty() {
